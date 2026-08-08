@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "motion/react";
 import {
   AudioLines,
@@ -12,22 +13,112 @@ import {
   ArrowRight,
   ShieldCheck,
   Sparkles,
+  AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-export default function LoginPage() {
+function LoginContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const supabase = createClient();
+
+  useEffect(() => {
+    const errorParam = searchParams.get("error");
+    if (errorParam) {
+      setErrorMsg(decodeURIComponent(errorParam));
+    }
+  }, [searchParams]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => setLoading(false), 1500);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (error) {
+          setErrorMsg(error.message);
+          setLoading(false);
+          return;
+        }
+
+        router.push("/ai-mock-interview");
+        router.refresh();
+      } else {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: name,
+            },
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+          },
+        });
+
+        if (error) {
+          setErrorMsg(error.message);
+          setLoading(false);
+          return;
+        }
+
+        if (data.session) {
+          router.push("/ai-mock-interview");
+          router.refresh();
+        } else {
+          setSuccessMsg(
+            "Account created! Please check your email to confirm your account."
+          );
+          setLoading(false);
+        }
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "An unexpected error occurred.";
+      setErrorMsg(message);
+      setLoading(false);
+    }
+  };
+
+  const handleOAuthLogin = async (provider: "google" | "github") => {
+    setLoading(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+
+      if (error) {
+        setErrorMsg(error.message);
+        setLoading(false);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "OAuth sign in failed.";
+      setErrorMsg(message);
+      setLoading(false);
+    }
   };
 
   return (
@@ -47,7 +138,7 @@ export default function LoginPage() {
 
       {/* Minimal top nav */}
       <nav className="relative z-10 flex h-16 items-center justify-between px-5 md:px-8">
-        <Link href="/landing" className="flex items-center gap-2.5">
+        <Link href="/" className="flex items-center gap-2.5">
           <span className="bg-brand-gradient grid size-8 place-items-center rounded-lg">
             <AudioLines className="size-4 text-primary-foreground" />
           </span>
@@ -57,7 +148,7 @@ export default function LoginPage() {
           href="/"
           className="text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
-          Back to app
+          Back to landing
         </Link>
       </nav>
 
@@ -93,13 +184,38 @@ export default function LoginPage() {
               </p>
             </div>
 
+            {/* Error / Success Banners */}
+            {errorMsg && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="relative mb-6 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3.5 text-xs text-destructive"
+              >
+                <AlertCircle className="size-4 shrink-0 mt-0.5" />
+                <div className="flex-1">{errorMsg}</div>
+              </motion.div>
+            )}
+
+            {successMsg && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="relative mb-6 flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-400"
+              >
+                <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
+                <div className="flex-1">{successMsg}</div>
+              </motion.div>
+            )}
+
             {/* OAuth buttons */}
             <div className="relative flex flex-col gap-3">
               <motion.button
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.99 }}
                 type="button"
-                className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary/70"
+                disabled={loading}
+                onClick={() => handleOAuthLogin("google")}
+                className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary/70 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {/* Google SVG */}
                 <svg viewBox="0 0 24 24" className="size-4 shrink-0">
@@ -127,7 +243,9 @@ export default function LoginPage() {
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.99 }}
                 type="button"
-                className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary/70"
+                disabled={loading}
+                onClick={() => handleOAuthLogin("github")}
+                className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary/70 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Github className="size-4 shrink-0" />
                 Continue with GitHub
@@ -162,6 +280,7 @@ export default function LoginPage() {
                     id="name"
                     type="text"
                     autoComplete="name"
+                    required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Arjun Sharma"
@@ -217,7 +336,7 @@ export default function LoginPage() {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder={mode === "login" ? "••••••••" : "Min 8 characters"}
+                    placeholder={mode === "login" ? "••••••••" : "Min 6 characters"}
                     className="w-full rounded-xl border border-border bg-secondary/30 px-4 py-3 pr-11 text-sm text-foreground placeholder:text-muted-foreground/60 outline-none transition-all focus:border-primary/50 focus:ring-2 focus:ring-primary/20"
                   />
                   <button
@@ -273,7 +392,11 @@ export default function LoginPage() {
               {mode === "login" ? "Don't have an account?" : "Already have an account?"}{" "}
               <button
                 type="button"
-                onClick={() => setMode(mode === "login" ? "signup" : "login")}
+                onClick={() => {
+                  setMode(mode === "login" ? "signup" : "login");
+                  setErrorMsg(null);
+                  setSuccessMsg(null);
+                }}
                 className="font-medium text-foreground underline-offset-2 transition-colors hover:text-primary hover:underline"
               >
                 {mode === "login" ? "Sign up free" : "Sign in"}
@@ -302,5 +425,13 @@ export default function LoginPage() {
         </motion.div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background flex items-center justify-center text-sm text-muted-foreground">Loading...</div>}>
+      <LoginContent />
+    </Suspense>
   );
 }

@@ -3,13 +3,13 @@ import Link from "next/link";
 
 const FOOTER_LINKS = {
   Product: [
-    { label: "Features", href: "/landing#features" },
-    { label: "How it Works", href: "/landing#how-it-works" },
-    { label: "Pricing", href: "/landing#pricing" },
-    { label: "FAQ", href: "/landing#faq" },
+    { label: "Features", href: "/#features" },
+    { label: "How it Works", href: "/#how-it-works" },
+    { label: "Pricing", href: "/#pricing" },
+    { label: "FAQ", href: "/#faq" },
   ],
   Tools: [
-    { label: "Resume Analyzer", href: "/" },
+    { label: "Resume Analyzer", href: "/landing" },
     { label: "AI Mock Interview", href: "/ai-mock-interview" },
     { label: "Interview Questions", href: "/interview-questions" },
     { label: "HR Dashboard", href: "/hr-dashboard" },
@@ -27,7 +27,7 @@ export default function SiteFooter() {
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           {/* Brand */}
           <div className="flex flex-col gap-4">
-            <Link href="/landing" className="flex items-center gap-2.5">
+            <Link href="/" className="flex items-center gap-2.5">
               <span className="bg-brand-gradient grid size-8 place-items-center rounded-lg">
                 <AudioLines className="size-4 text-primary-foreground" />
               </span>

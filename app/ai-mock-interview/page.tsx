@@ -1,56 +1,111 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import {
   FileText,
   User,
   Sparkles,
-  Mic,
   X,
   Upload,
   Clock,
   Briefcase,
   Check,
   ChevronDown,
+  Lock,
+  Layers,
+  Award,
+  AlertCircle,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
-export default function AIInterview() {
-  const [screen, setScreen] = useState(1);
+export default function AIInterviewSetup() {
+  const router = useRouter();
   const [jobDescription, setJobDescription] = useState("");
   const [resume, setResume] = useState("");
-  const [currentQuestion, setCurrentQuestion] = useState("");
-  const [timer, setTimer] = useState(0);
-//   const [isRecording, setIsRecording] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
   const [fileName, setFileName] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
 
-  // Custom Dropdown States
-  const [duration, setDuration] = useState("15 min");
-  const [isDurationOpen, setIsDurationOpen] = useState(false);
+  // Role and Experience Level
+  const [role, setRole] = useState("Fullstack Developer");
+  const [experienceLevel, setExperienceLevel] = useState("Mid-Level (2-5 yrs)");
+  const [isRoleOpen, setIsRoleOpen] = useState(false);
+  const [isExpOpen, setIsExpOpen] = useState(false);
 
-  const [interviewType, setInterviewType] = useState("Technical Round");
+  // Interview Type & Approx Duration
+  const [interviewType, setInterviewType] = useState<
+    "Technical Round" | "HR Round" | "Behavioural Round" | "Coding Round"
+  >("Technical Round");
   const [isTypeOpen, setIsTypeOpen] = useState(false);
 
-  const durationOptions = ["10 min", "15 min", "30 min"];
-  const interviewTypeOptions = [
-    "Technical Round",
-    "Behavioural Round",
-    "Coding Round",
-    "HR Round",
+  // Error/Loading states
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const roleOptions = [
+    "Fullstack Developer",
+    "Frontend Engineer",
+    "Backend Engineer",
+    "DevOps Engineer",
+    "AI/ML Engineer",
+    "Mobile Developer",
   ];
 
-  // Refs to detect outside clicks
-  const durationRef = useRef<HTMLDivElement>(null);
+  const expOptions = [
+    "Junior (0-2 yrs)",
+    "Mid-Level (2-5 yrs)",
+    "Senior (5+ yrs)",
+    "Lead / Architect",
+  ];
+
+  const interviewTypes = [
+    {
+      name: "Technical Round",
+      durationDisplay: "~20–25 min",
+      approxMinutes: 25,
+      description: "Deep dive into core engineering concepts, architecture & trade-offs.",
+      disabled: false,
+    },
+    {
+      name: "HR Round",
+      durationDisplay: "~10–15 min",
+      approxMinutes: 15,
+      description: "Cultural fit, career goals, background & communication skills.",
+      disabled: false,
+    },
+    {
+      name: "Behavioural Round",
+      durationDisplay: "~10–15 min",
+      approxMinutes: 15,
+      description: "STAR-method questions on conflict resolution, leadership & teamwork.",
+      disabled: false,
+    },
+    {
+      name: "Coding Round",
+      durationDisplay: "~30–45 min",
+      approxMinutes: 45,
+      description: "Live coding editor and algorithmic problem solving.",
+      disabled: true,
+      badge: "Coming Soon",
+    },
+  ] as const;
+
+  // Compute duration based on selected interview type
+  const selectedTypeObj =
+    interviewTypes.find((t) => t.name === interviewType) || interviewTypes[0];
+
+  // Refs for outside click detection
+  const roleRef = useRef<HTMLDivElement>(null);
+  const expRef = useRef<HTMLDivElement>(null);
   const typeRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (
-        durationRef.current &&
-        !durationRef.current.contains(event.target as Node)
-      ) {
-        setIsDurationOpen(false);
+      if (roleRef.current && !roleRef.current.contains(event.target as Node)) {
+        setIsRoleOpen(false);
+      }
+      if (expRef.current && !expRef.current.contains(event.target as Node)) {
+        setIsExpOpen(false);
       }
       if (typeRef.current && !typeRef.current.contains(event.target as Node)) {
         setIsTypeOpen(false);
@@ -59,20 +114,6 @@ export default function AIInterview() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
-  // Timer effect
-  useEffect(() => {
-    if (screen === 3) {
-      const interval = setInterval(() => setTimer((prev) => prev + 1), 1000);
-      return () => clearInterval(interval);
-    }
-  }, [screen]);
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-  };
 
   const handleFileRead = (file: File) => {
     const reader = new FileReader();
@@ -87,274 +128,372 @@ export default function AIInterview() {
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files[0];
-    if (
-      file &&
-      (file.type.includes("text") || file.type === "application/pdf")
-    ) {
+    if (file && (file.type.includes("text") || file.type === "application/pdf")) {
       handleFileRead(file);
     }
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
+  const handleStartInterview = async () => {
+    if (!jobDescription || !resume) return;
 
-  const handleDragLeave = () => setIsDragging(false);
+    setLoading(true);
+    setErrorMsg(null);
 
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) handleFileRead(file);
-  };
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-  const handleStartInterview = () => {
-    if (jobDescription && resume) {
-      setScreen(2);
-      setTimeout(() => {
-        setCurrentQuestion("Tell me about yourself and your experience...");
-        setScreen(3);
-      }, 3000);
+    if (!user) {
+      router.push("/login?error=Please%20sign%20in%20to%20start%20your%20interview");
+      return;
+    }
+
+    const interviewId = crypto.randomUUID();
+
+    try {
+      // Attempt insertion into Supabase interviews table
+      const { error } = await supabase.from("interviews").insert([
+        {
+          id: interviewId,
+          user_id: user.id,
+          role,
+          experience_level: experienceLevel,
+          interview_type: selectedTypeObj.name,
+          duration_minutes: selectedTypeObj.approxMinutes,
+          job_description: jobDescription,
+          resume_text: resume,
+          status: "scheduled",
+          created_at: new Date().toISOString(),
+        },
+      ]);
+
+      if (error) {
+        console.warn("Supabase insertion notice:", error.message);
+        sessionStorage.setItem(
+          `interview_${interviewId}`,
+          JSON.stringify({
+            id: interviewId,
+            user_id: user.id,
+            role,
+            experience_level: experienceLevel,
+            interview_type: selectedTypeObj.name,
+            duration_display: selectedTypeObj.durationDisplay,
+            approx_minutes: selectedTypeObj.approxMinutes,
+            job_description: jobDescription,
+            resume_text: resume,
+            status: "scheduled",
+          })
+        );
+      }
+
+      // Navigate to candidate-specific room
+      router.push(`/ai-mock-interview/room/${interviewId}`);
+    } catch (err: unknown) {
+      console.error("Error creating interview room:", err);
+      sessionStorage.setItem(
+        `interview_${interviewId}`,
+        JSON.stringify({
+          id: interviewId,
+          user_id: user.id,
+          role,
+          experience_level: experienceLevel,
+          interview_type: selectedTypeObj.name,
+          duration_display: selectedTypeObj.durationDisplay,
+          approx_minutes: selectedTypeObj.approxMinutes,
+          job_description: jobDescription,
+          resume_text: resume,
+          status: "scheduled",
+        })
+      );
+      router.push(`/ai-mock-interview/room/${interviewId}`);
     }
   };
 
-  const handleEndSession = () => {
-    setScreen(1);
-    setTimer(0);
-    setCurrentQuestion("");
-    setJobDescription("");
-    setResume("");
-    setFileName("");
-    setDuration("15 min");
-    setInterviewType("Technical Round");
-  };
-
   return (
-    <div className="min-h-screen bg-zinc-950 font-sans text-white selection:bg-zinc-700 py-12 md:py-24 px-4">
+    <div className="min-h-screen bg-zinc-950 font-sans text-white selection:bg-zinc-700 py-12 md:py-20 px-4">
       <div className="w-full max-w-5xl mx-auto">
-        {screen === 1 && (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <header className="mb-12 space-y-4 text-center md:text-left">
-              <div className="inline-block px-3 py-1 bg-zinc-700/50 border border-zinc-800 rounded-full text-xs font-semibold text-zinc-300 tracking-wider uppercase">
-                AI Interviewer
-              </div>
-              <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-white">
-                AI Mock Interview
-              </h1>
-              <p className="text-zinc-500 max-w-xl text-lg md:text-xl">
-                Practice your interview skills. Paste your JD and resume to get personalized questions.
-              </p>
-            </header>
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+          {/* Header */}
+          <header className="mb-10 text-center md:text-left">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-zinc-800/80 border border-zinc-700/60 rounded-full text-xs font-semibold text-zinc-300 tracking-wider uppercase mb-3">
+              <Sparkles className="w-3.5 h-3.5 text-primary" />
+              AI Mock Interview Setup
+            </div>
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-white">
+              Configure Your Practice Interview
+            </h1>
+            <p className="text-zinc-400 max-w-2xl text-base md:text-lg mt-2">
+              Select your targeted role and upload your details. The AI interviewer adapts question depth and session length dynamically to your responses.
+            </p>
+          </header>
 
-            <div className="bg-zinc-900 border border-zinc-800 rounded-3xl shadow-lg shadow-black/40 overflow-hidden">
-              {/* Dropdowns */}
-              <div className="p-8 border-b border-zinc-800">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Duration Dropdown */}
-                  <div ref={durationRef} className="relative">
-                    <label className="flex items-center gap-2 text-sm font-bold text-white mb-3 uppercase tracking-wider">
-                      <Clock className="w-4 h-4 text-zinc-400" />
-                      Duration
-                    </label>
-                    <button
-                      onClick={() => setIsDurationOpen(!isDurationOpen)}
-                      className="w-full px-5 py-4 bg-zinc-950 border border-zinc-800 rounded-2xl flex items-center justify-between hover:bg-zinc-200 transition-all text-sm font-semibold text-zinc-300"
-                    >
-                      <span>{duration}</span>
-                      <ChevronDown
-                        className={`w-5 h-5 text-zinc-400 transition-transform ${isDurationOpen ? "rotate-180" : ""}`}
-                      />
-                    </button>
+          {errorMsg && (
+            <div className="mb-6 flex items-center gap-3 rounded-2xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
 
-                    {isDurationOpen && (
-                      <div className="absolute z-20 w-full mt-2 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl overflow-hidden py-2 animate-in fade-in slide-in-from-top-2">
-                        {durationOptions.map((opt) => (
-                          <button
-                            key={opt}
-                            onClick={() => {
-                              setDuration(opt);
-                              setIsDurationOpen(false);
-                            }}
-                            className="w-full px-5 py-3 text-left flex items-center justify-between hover:bg-zinc-950 transition-colors text-sm font-medium text-zinc-300"
-                          >
-                            <span>{opt}</span>
-                            {duration === opt && <Check className="w-4 h-4 text-white" />}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl shadow-black/60 overflow-hidden">
+            {/* Top Config Row: Role, Experience Level, Interview Type */}
+            <div className="p-6 md:p-8 border-b border-zinc-800 bg-zinc-900/50">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                {/* Role Selection */}
+                <div ref={roleRef} className="relative">
+                  <label className="flex items-center gap-2 text-xs font-bold text-zinc-300 mb-2 uppercase tracking-wider">
+                    <Briefcase className="w-3.5 h-3.5 text-zinc-400" />
+                    Target Role
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsRoleOpen(!isRoleOpen)}
+                    className="w-full px-4 py-3.5 bg-zinc-950 border border-zinc-800 rounded-2xl flex items-center justify-between hover:border-zinc-700 transition-all text-sm font-medium text-zinc-200"
+                  >
+                    <span className="truncate">{role}</span>
+                    <ChevronDown
+                      className={`w-4 h-4 text-zinc-400 transition-transform ${isRoleOpen ? "rotate-180" : ""}`}
+                    />
+                  </button>
 
-                  {/* Interview Type Dropdown */}
-                  <div ref={typeRef} className="relative">
-                    <label className="flex items-center gap-2 text-sm font-bold text-white mb-3 uppercase tracking-wider">
-                      <Briefcase className="w-4 h-4 text-zinc-400" />
-                      Interview Type
-                    </label>
-                    <button
-                      onClick={() => setIsTypeOpen(!isTypeOpen)}
-                      className="w-full px-5 py-4 bg-zinc-950 border border-zinc-800 rounded-2xl flex items-center justify-between hover:bg-zinc-200 transition-all text-sm font-semibold text-zinc-300"
-                    >
-                      <span>{interviewType}</span>
-                      <ChevronDown
-                        className={`w-5 h-5 text-zinc-400 transition-transform ${isTypeOpen ? "rotate-180" : ""}`}
-                      />
-                    </button>
-
-                    {isTypeOpen && (
-                      <div className="absolute z-20 w-full mt-2 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl overflow-hidden py-2 animate-in fade-in slide-in-from-top-2">
-                        {interviewTypeOptions.map((opt) => (
-                          <button
-                            key={opt}
-                            onClick={() => {
-                              setInterviewType(opt);
-                              setIsTypeOpen(false);
-                            }}
-                            className="w-full px-5 py-3 text-left flex items-center justify-between hover:bg-zinc-950 transition-colors text-sm font-medium text-zinc-300"
-                          >
-                            <span>{opt}</span>
-                            {interviewType === opt && <Check className="w-4 h-4 text-white" />}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* JD and Resume */}
-              <div className="grid md:grid-cols-2 gap-8 p-8">
-                {/* Job Description */}
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-8 h-8 bg-zinc-900 rounded-full flex items-center justify-center">
-                      <FileText className="w-4 h-4 text-white" />
-                    </div>
-                    <h2 className="text-lg font-bold text-white">Job Description</h2>
-                  </div>
-                  <textarea
-                    value={jobDescription}
-                    onChange={(e) => setJobDescription(e.target.value)}
-                    placeholder="Paste the job description here..."
-                    className="w-full h-[220px] p-5 bg-zinc-950 border border-zinc-800 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-white/10 focus:border-zinc-900 transition-all text-sm"
-                  />
-                </div>
-
-                {/* Resume */}
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-8 h-8 bg-zinc-900 rounded-full flex items-center justify-center">
-                      <User className="w-4 h-4 text-white" />
-                    </div>
-                    <h2 className="text-lg font-bold text-white">Your Resume</h2>
-                  </div>
-
-                  {!resume ? (
-                    <div
-                      onDrop={handleDrop}
-                      onDragOver={handleDragOver}
-                      onDragLeave={handleDragLeave}
-                      className={`relative h-[220px] border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all ${
-                        isDragging
-                          ? "border-zinc-900 bg-zinc-950 scale-[1.02]"
-                          : "border-zinc-800 bg-zinc-950 hover:border-zinc-300 hover:bg-zinc-200/50"
-                      }`}
-                    >
-                      <input
-                        type="file"
-                        accept=".txt,.pdf"
-                        onChange={handleFileInput}
-                        className="absolute inset-0 opacity-0 cursor-pointer"
-                      />
-                      <div className="w-12 h-12 mb-4 bg-zinc-900 rounded-full flex items-center justify-center border border-zinc-800 shadow-sm text-zinc-400">
-                        <Upload className="w-5 h-5" />
-                      </div>
-                      <p className="font-semibold text-white mb-1">Upload Resume</p>
-                      <p className="text-xs text-zinc-500">Supports TXT, PDF</p>
-                    </div>
-                  ) : (
-                    <div className="h-[220px] bg-zinc-950 border border-zinc-800 rounded-2xl p-6 flex flex-col justify-center">
-                      <div className="flex items-center gap-4 bg-zinc-900 border border-zinc-800 p-4 rounded-xl shadow-sm">
-                        <div className="w-10 h-10 bg-zinc-800 rounded-lg flex items-center justify-center shrink-0">
-                          <FileText className="w-5 h-5 text-zinc-400" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-white truncate">{fileName || "Resume uploaded"}</p>
-                          <p className="text-xs text-zinc-500 mt-0.5">Ready for analysis</p>
-                        </div>
+                  {isRoleOpen && (
+                    <div className="absolute z-30 w-full mt-2 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl py-2 max-h-56 overflow-y-auto animate-in fade-in slide-in-from-top-2">
+                      {roleOptions.map((opt) => (
                         <button
+                          key={opt}
+                          type="button"
                           onClick={() => {
-                            setResume("");
-                            setFileName("");
+                            setRole(opt);
+                            setIsRoleOpen(false);
                           }}
-                          className="w-8 h-8 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-400 hover:bg-zinc-200 transition-colors"
+                          className="w-full px-4 py-2.5 text-left flex items-center justify-between hover:bg-zinc-800 transition-colors text-sm font-medium text-zinc-300"
                         >
-                          <X className="w-5 h-5" />
+                          <span>{opt}</span>
+                          {role === opt && <Check className="w-4 h-4 text-primary" />}
                         </button>
-                      </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Experience Level */}
+                <div ref={expRef} className="relative">
+                  <label className="flex items-center gap-2 text-xs font-bold text-zinc-300 mb-2 uppercase tracking-wider">
+                    <Award className="w-3.5 h-3.5 text-zinc-400" />
+                    Experience Level
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsExpOpen(!isExpOpen)}
+                    className="w-full px-4 py-3.5 bg-zinc-950 border border-zinc-800 rounded-2xl flex items-center justify-between hover:border-zinc-700 transition-all text-sm font-medium text-zinc-200"
+                  >
+                    <span className="truncate">{experienceLevel}</span>
+                    <ChevronDown
+                      className={`w-4 h-4 text-zinc-400 transition-transform ${isExpOpen ? "rotate-180" : ""}`}
+                    />
+                  </button>
+
+                  {isExpOpen && (
+                    <div className="absolute z-30 w-full mt-2 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl py-2 animate-in fade-in slide-in-from-top-2">
+                      {expOptions.map((opt) => (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => {
+                            setExperienceLevel(opt);
+                            setIsExpOpen(false);
+                          }}
+                          className="w-full px-4 py-2.5 text-left flex items-center justify-between hover:bg-zinc-800 transition-colors text-sm font-medium text-zinc-300"
+                        >
+                          <span>{opt}</span>
+                          {experienceLevel === opt && <Check className="w-4 h-4 text-primary" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Interview Type Dropdown */}
+                <div ref={typeRef} className="relative">
+                  <label className="flex items-center gap-2 text-xs font-bold text-zinc-300 mb-2 uppercase tracking-wider">
+                    <Layers className="w-3.5 h-3.5 text-zinc-400" />
+                    Interview Type
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsTypeOpen(!isTypeOpen)}
+                    className="w-full px-4 py-3.5 bg-zinc-950 border border-zinc-800 rounded-2xl flex items-center justify-between hover:border-zinc-700 transition-all text-sm font-medium text-zinc-200"
+                  >
+                    <span className="truncate">{interviewType}</span>
+                    <ChevronDown
+                      className={`w-4 h-4 text-zinc-400 transition-transform ${isTypeOpen ? "rotate-180" : ""}`}
+                    />
+                  </button>
+
+                  {isTypeOpen && (
+                    <div className="absolute z-30 w-full mt-2 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl py-2 animate-in fade-in slide-in-from-top-2">
+                      {interviewTypes.map((opt) => (
+                        <button
+                          key={opt.name}
+                          type="button"
+                          disabled={opt.disabled}
+                          onClick={() => {
+                            if (!opt.disabled) {
+                              setInterviewType(opt.name);
+                              setIsTypeOpen(false);
+                            }
+                          }}
+                          className={`w-full px-4 py-3 text-left flex items-center justify-between transition-colors text-sm font-medium ${
+                            opt.disabled
+                              ? "opacity-50 cursor-not-allowed bg-zinc-950/40 text-zinc-500"
+                              : "hover:bg-zinc-800 text-zinc-300"
+                          }`}
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-semibold">{opt.name}</span>
+                            <span className="text-[11px] text-zinc-400">{opt.durationDisplay}</span>
+                          </div>
+                          {opt.disabled ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[10px] font-semibold text-zinc-400">
+                              <Lock className="w-3 h-3" />
+                              {opt.badge}
+                            </span>
+                          ) : (
+                            interviewType === opt.name && <Check className="w-4 h-4 text-primary" />
+                          )}
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Start Button */}
-              <div className="p-8 pt-0 flex justify-end">
-                <button
-                  onClick={handleStartInterview}
-                  disabled={!jobDescription || !resume}
-                  className="w-full md:w-auto px-10 py-4 bg-white hover:bg-zinc-200 disabled:bg-zinc-700 disabled:text-zinc-500 text-zinc-950 font-semibold rounded-2xl shadow-xl shadow-zinc-900/10 transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
-                >
-                  <Sparkles className="w-5 h-5" />
-                  Start AI Interview
-                </button>
+              {/* Automatic Approx Duration Notice */}
+              <div className="mt-5 flex items-center justify-between rounded-2xl border border-zinc-800 bg-zinc-950/60 px-4 py-3 text-xs text-zinc-400">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-primary shrink-0" />
+                  <span>
+                    Estimated duration for <strong className="text-zinc-200">{selectedTypeObj.name}</strong> (adapts dynamically):
+                  </span>
+                </div>
+                <span className="font-bold text-white bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1">
+                  {selectedTypeObj.durationDisplay}
+                </span>
               </div>
             </div>
-          </div>
-        )}
 
-        {screen === 2 && (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] animate-in fade-in duration-500">
-            <div className="relative w-32 h-32 flex items-center justify-center mb-8">
-              <div className="absolute inset-0 border-4 border-zinc-800 rounded-full"></div>
-              <div className="absolute inset-0 border-4 border-zinc-900 rounded-full border-t-transparent animate-spin"></div>
-              <Sparkles className="w-8 h-8 text-white" />
+            {/* JD and Resume Upload Inputs */}
+            <div className="grid md:grid-cols-2 gap-8 p-6 md:p-8">
+              {/* Job Description */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2.5 mb-1">
+                  <div className="w-7 h-7 bg-zinc-800 rounded-full flex items-center justify-center">
+                    <FileText className="w-3.5 h-3.5 text-zinc-300" />
+                  </div>
+                  <h2 className="text-base font-bold text-white">Job Description</h2>
+                </div>
+                <textarea
+                  value={jobDescription}
+                  onChange={(e) => setJobDescription(e.target.value)}
+                  placeholder="Paste the target job description here..."
+                  className="w-full h-[210px] p-4 bg-zinc-950 border border-zinc-800 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-zinc-700 transition-all text-xs md:text-sm text-zinc-200 placeholder:text-zinc-600"
+                />
+              </div>
+
+              {/* Resume */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2.5 mb-1">
+                  <div className="w-7 h-7 bg-zinc-800 rounded-full flex items-center justify-center">
+                    <User className="w-3.5 h-3.5 text-zinc-300" />
+                  </div>
+                  <h2 className="text-base font-bold text-white">Your Resume</h2>
+                </div>
+
+                {!resume ? (
+                  <div
+                    onDrop={handleDrop}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsDragging(true);
+                    }}
+                    onDragLeave={() => setIsDragging(false)}
+                    className={`relative h-[210px] border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all ${
+                      isDragging
+                        ? "border-primary bg-primary/5 scale-[1.01]"
+                        : "border-zinc-800 bg-zinc-950 hover:border-zinc-700 hover:bg-zinc-900/50"
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      accept=".txt,.pdf"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleFileRead(file);
+                      }}
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                    />
+                    <div className="w-10 h-10 mb-3 bg-zinc-900 rounded-full flex items-center justify-center border border-zinc-800 text-zinc-400">
+                      <Upload className="w-4 h-4" />
+                    </div>
+                    <p className="font-semibold text-sm text-white mb-1">Upload Resume</p>
+                    <p className="text-xs text-zinc-500">Supports TXT, PDF files</p>
+                  </div>
+                ) : (
+                  <div className="h-[210px] bg-zinc-950 border border-zinc-800 rounded-2xl p-5 flex flex-col justify-center">
+                    <div className="flex items-center gap-4 bg-zinc-900 border border-zinc-800 p-4 rounded-xl shadow-sm">
+                      <div className="w-10 h-10 bg-zinc-800 rounded-lg flex items-center justify-center shrink-0">
+                        <FileText className="w-5 h-5 text-primary" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-white truncate">
+                          {fileName || "Resume Uploaded"}
+                        </p>
+                        <p className="text-xs text-emerald-400 mt-0.5 font-medium flex items-center gap-1">
+                          <Check className="w-3 h-3" /> Ready for AI analysis
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResume("");
+                          setFileName("");
+                        }}
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-            <h2 className="text-3xl font-extrabold text-white mb-3">Preparing Interview</h2>
-            <p className="text-zinc-500 font-medium">Analyzing job requirements and your background...</p>
-          </div>
-        )}
 
-        {screen === 3 && (
-          <div className="w-full max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-8 duration-700">
-            <div className="bg-zinc-900 border border-zinc-800 rounded-3xl shadow-xl shadow-black/40 p-8 md:p-12 text-center relative overflow-hidden">
-              <div className="absolute top-0 inset-x-0 h-1 bg-zinc-800">
-                <div className="h-full bg-zinc-900 w-1/3 animate-pulse rounded-full"></div>
+            {/* Start Button Footer */}
+            <div className="p-6 md:p-8 pt-0 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-zinc-800/60 mt-2">
+              <div className="text-xs text-zinc-500 text-center sm:text-left">
+                Ensure your microphone is connected before starting.
               </div>
-
-              <div className="inline-block px-4 py-1.5 bg-zinc-800 rounded-full font-mono text-zinc-400 font-bold tracking-widest text-sm mb-10">
-                {formatTime(timer)}
-              </div>
-              
-              <div className="bg-zinc-950 border border-zinc-800 rounded-3xl p-8 md:p-12 mb-12 min-h-[200px] flex items-center justify-center">
-                <p className="text-2xl md:text-3xl font-medium text-white leading-relaxed max-w-2xl mx-auto">
-                  &ldquo;{currentQuestion}&rdquo;
-                </p>
-              </div>
-
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                <button className="w-20 h-20 bg-white hover:bg-zinc-200 rounded-full flex items-center justify-center shadow-xl shadow-zinc-900/20 text-zinc-950 transition-transform active:scale-95 group">
-                  <Mic className="w-8 h-8 group-hover:scale-110 transition-transform" />
-                </button>
-                <div className="w-px h-12 bg-zinc-700 hidden sm:block mx-4"></div>
-                <button
-                  onClick={handleEndSession}
-                  className="px-8 py-4 bg-zinc-900 border border-zinc-800 text-zinc-400 font-bold rounded-full hover:bg-zinc-950 hover:text-white transition-colors"
-                >
-                  End Session
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleStartInterview}
+                disabled={!jobDescription || !resume || loading}
+                className="w-full sm:w-auto px-8 py-3.5 bg-brand-gradient hover:opacity-95 disabled:opacity-50 disabled:cursor-not-allowed text-primary-foreground font-semibold rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2.5 active:scale-[0.98]"
+              >
+                {loading ? (
+                  <svg className="size-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    Start Voice Interview
+                  </>
+                )}
+              </button>
             </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

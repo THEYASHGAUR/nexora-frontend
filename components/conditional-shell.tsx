@@ -6,9 +6,10 @@ import SiteFooter from "./site-footer";
 
 /**
  * Renders the global Header + Footer only on "app" routes.
- * Standalone pages like /landing and /login manage their own nav/footer.
+ * Standalone pages like / (landing) and /login manage their own nav/footer.
  */
-const STANDALONE_ROUTES = ["/landing", "/login"];
+const STANDALONE_EXACT = ["/", "/landing"];
+const STANDALONE_PREFIX = ["/login", "/ai-mock-interview/room"];
 
 export default function ConditionalShell({
   children,
@@ -16,7 +17,9 @@ export default function ConditionalShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const isStandalone = STANDALONE_ROUTES.some((r) => pathname.startsWith(r));
+  const isStandalone =
+    STANDALONE_EXACT.includes(pathname) ||
+    STANDALONE_PREFIX.some((prefix) => pathname.startsWith(prefix));
 
   if (isStandalone) {
     return <>{children}</>;
