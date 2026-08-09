@@ -16,6 +16,7 @@ export default function Header() {
   const supabase = createClient();
 
   useEffect(() => {
+    const supabase = createClient();
     // Fetch initial user session
     supabase.auth.getUser().then(({ data }) => {
       setUser(data.user);

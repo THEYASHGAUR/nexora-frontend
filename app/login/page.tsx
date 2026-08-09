@@ -37,7 +37,8 @@ function LoginContent() {
   useEffect(() => {
     const errorParam = searchParams.get("error");
     if (errorParam) {
-      setErrorMsg(decodeURIComponent(errorParam));
+      const decoded = decodeURIComponent(errorParam);
+      queueMicrotask(() => setErrorMsg(decoded));
     }
   }, [searchParams]);
 

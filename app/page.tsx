@@ -21,7 +21,6 @@ import {
   ChevronDown,
   ClipboardList,
   FileText,
-  Github,
   History,
   LineChart,
   Mic,

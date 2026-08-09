@@ -16,6 +16,10 @@ import {
   Layers,
   Award,
   AlertCircle,
+  ShieldCheck,
+  Mic,
+  Sun,
+  Volume2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -90,11 +94,9 @@ export default function AIInterviewSetup() {
     },
   ] as const;
 
-  // Compute duration based on selected interview type
   const selectedTypeObj =
     interviewTypes.find((t) => t.name === interviewType) || interviewTypes[0];
 
-  // Refs for outside click detection
   const roleRef = useRef<HTMLDivElement>(null);
   const expRef = useRef<HTMLDivElement>(null);
   const typeRef = useRef<HTMLDivElement>(null);
@@ -115,11 +117,45 @@ export default function AIInterviewSetup() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleFileRead = (file: File) => {
+  const handleFileRead = async (file: File) => {
+    setFileName(file.name);
+
+    if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+      try {
+        const formData = new FormData();
+        formData.append("resume", file);
+        formData.append("jd_text", jobDescription || "General candidate resume details");
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8009";
+
+        const res = await fetch(`${backendUrl}/analyze`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.analysis?.summary) {
+            const summaryText = `Resume File: ${file.name}\n\nSummary:\n${data.analysis.summary}\n\nStrengths:\n${(data.analysis.strengths || []).join("\n")}`;
+            setResume(summaryText);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Backend PDF extraction fallback to local reader:", err);
+      }
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
-      setResume(e.target?.result as string);
-      setFileName(file.name);
+      const rawText = (e.target?.result as string) || "";
+      // Strip null bytes (\u0000) and invalid non-printable control characters that crash PostgreSQL text columns
+      const sanitizedText = rawText
+        .replace(/\0/g, "")
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ")
+        .replace(/%PDF-[^\n\r]+/g, "")
+        .trim();
+
+      setResume(sanitizedText || `Resume details from ${file.name}`);
     };
     reader.readAsText(file);
   };
@@ -149,10 +185,66 @@ export default function AIInterviewSetup() {
       return;
     }
 
+    // 1. Microphone Access Check
+    try {
+      if (typeof window !== "undefined" && navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Stop audio tracks after verifying browser permission
+        stream.getTracks().forEach((track) => track.stop());
+      } else {
+        throw new Error("Microphone API not supported in this browser environment");
+      }
+    } catch (micErr: unknown) {
+      console.error("Microphone access check failed:", micErr);
+      setErrorMsg(
+        "Microphone access is required to take the AI voice interview. Please grant microphone access permissions in your browser and try again."
+      );
+      setLoading(false);
+      return;
+    }
+
+    // 2. Verify Backend API Keys (OpenAI, Deepgram, LiveKit)
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8009";
+
+    try {
+      const verifyRes = await fetch(`${backendUrl}/interview/verify-keys`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      const verifyData = await verifyRes.json();
+
+      if (!verifyRes.ok || !verifyData.success) {
+        setErrorMsg(
+          verifyData.error ||
+            "Backend credential check failed. Please ensure valid OpenAI, Deepgram, and LiveKit keys are set in nexora-backend/.env"
+        );
+        setLoading(false);
+        return;
+      }
+    } catch (err: unknown) {
+      console.error("Backend API verification call error:", err);
+      setErrorMsg(
+        "Backend credential check failed. Unable to reach backend server at " +
+          backendUrl +
+          ". Please ensure nexora-backend server is running and keys are configured."
+      );
+      setLoading(false);
+      return; // Stop execution: DO NOT enter room if verify-keys fails!
+    }
+
+    // 3. Create Interview Room & Navigate
     const interviewId = crypto.randomUUID();
 
     try {
-      // Attempt insertion into Supabase interviews table
+      // Ensure inputs are strictly sanitized of null bytes before sending to Supabase
+      const cleanResume = (resume || "")
+        .replace(/\0/g, "")
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ");
+      const cleanJd = (jobDescription || "")
+        .replace(/\0/g, "")
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ");
+
       const { error } = await supabase.from("interviews").insert([
         {
           id: interviewId,
@@ -161,52 +253,27 @@ export default function AIInterviewSetup() {
           experience_level: experienceLevel,
           interview_type: selectedTypeObj.name,
           duration_minutes: selectedTypeObj.approxMinutes,
-          job_description: jobDescription,
-          resume_text: resume,
+          job_description: cleanJd,
+          resume_text: cleanResume,
           status: "scheduled",
           created_at: new Date().toISOString(),
         },
       ]);
 
       if (error) {
-        console.warn("Supabase insertion notice:", error.message);
-        sessionStorage.setItem(
-          `interview_${interviewId}`,
-          JSON.stringify({
-            id: interviewId,
-            user_id: user.id,
-            role,
-            experience_level: experienceLevel,
-            interview_type: selectedTypeObj.name,
-            duration_display: selectedTypeObj.durationDisplay,
-            approx_minutes: selectedTypeObj.approxMinutes,
-            job_description: jobDescription,
-            resume_text: resume,
-            status: "scheduled",
-          })
-        );
+        console.error("Supabase interview room creation error:", error);
+        setErrorMsg(`Failed to create interview session: ${error.message || "Database insert error"}`);
+        setLoading(false);
+        return; // STOP! DO NOT enter room on error!
       }
 
-      // Navigate to candidate-specific room
       router.push(`/ai-mock-interview/room/${interviewId}`);
     } catch (err: unknown) {
       console.error("Error creating interview room:", err);
-      sessionStorage.setItem(
-        `interview_${interviewId}`,
-        JSON.stringify({
-          id: interviewId,
-          user_id: user.id,
-          role,
-          experience_level: experienceLevel,
-          interview_type: selectedTypeObj.name,
-          duration_display: selectedTypeObj.durationDisplay,
-          approx_minutes: selectedTypeObj.approxMinutes,
-          job_description: jobDescription,
-          resume_text: resume,
-          status: "scheduled",
-        })
-      );
-      router.push(`/ai-mock-interview/room/${interviewId}`);
+      const msg = err instanceof Error ? err.message : "Failed to create interview session.";
+      setErrorMsg(`Could not start interview room: ${msg}`);
+      setLoading(false);
+      return; // STOP! DO NOT enter room on error!
     }
   };
 
@@ -228,10 +295,11 @@ export default function AIInterviewSetup() {
             </p>
           </header>
 
+          {/* Key Verification / General Error Alert */}
           {errorMsg && (
-            <div className="mb-6 flex items-center gap-3 rounded-2xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-              <AlertCircle className="w-5 h-5 shrink-0" />
-              <span>{errorMsg}</span>
+            <div className="mb-6 flex items-start gap-3 rounded-2xl border border-destructive/40 bg-destructive/10 p-4 text-xs md:text-sm text-destructive shadow-lg">
+              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+              <div className="flex-1 leading-relaxed">{errorMsg}</div>
             </div>
           )}
 
@@ -468,10 +536,34 @@ export default function AIInterviewSetup() {
               </div>
             </div>
 
+            {/* Pre-Interview Environment Note */}
+            <div className="mx-6 md:mx-8 mb-6 p-4 md:p-5 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-200 text-xs md:text-sm flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0 mt-0.5 md:mt-0">
+                  <AlertCircle className="w-4 h-4" />
+                </div>
+                <div className="space-y-1">
+                  <p className="font-bold text-amber-300 tracking-wide flex items-center gap-2">
+                    Important Note Before Starting
+                  </p>
+                  <p className="text-amber-200/90 leading-relaxed text-xs md:text-xs">
+                    Please make sure you are in a <strong>quiet environment</strong> with <strong>good lighting</strong> and a working <strong>microphone</strong> so that there will be no problems or background noise during your interview.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 self-end md:self-center text-[11px] font-semibold text-amber-300/80 bg-amber-950/40 px-3 py-1.5 rounded-xl border border-amber-500/20">
+                <Mic className="w-3.5 h-3.5" />
+                <Sun className="w-3.5 h-3.5" />
+                <Volume2 className="w-3.5 h-3.5" />
+                <span>Quiet & Well-lit Room</span>
+              </div>
+            </div>
+
             {/* Start Button Footer */}
             <div className="p-6 md:p-8 pt-0 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-zinc-800/60 mt-2">
-              <div className="text-xs text-zinc-500 text-center sm:text-left">
-                Ensure your microphone is connected before starting.
+              <div className="text-xs text-zinc-500 text-center sm:text-left flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                API credentials verified automatically before entering.
               </div>
               <button
                 type="button"

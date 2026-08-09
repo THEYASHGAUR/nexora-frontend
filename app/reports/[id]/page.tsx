@@ -3,7 +3,6 @@
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { motion } from "motion/react";
 import {
   Award,
   CheckCircle2,
@@ -13,7 +12,6 @@ import {
   RotateCcw,
   History as HistoryIcon,
   ChevronLeft,
-  Share2,
   Printer,
   Sparkles,
   TrendingUp,

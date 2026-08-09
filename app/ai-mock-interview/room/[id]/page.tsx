@@ -8,8 +8,6 @@ import {
   Mic,
   MicOff,
   PhoneOff,
-  Pause,
-  Play,
   Clock,
   ShieldAlert,
   Sparkles,
@@ -57,10 +55,9 @@ export default function VoiceInterviewRoom({
 
   // Audio Controls & State
   const [speakerState, setSpeakerState] = useState<
-    "connecting" | "ai_speaking" | "candidate_speaking" | "listening" | "paused" | "ended"
+    "connecting" | "ai_speaking" | "candidate_speaking" | "listening" | "ended"
   >("connecting");
   const [isMuted, setIsMuted] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
 
   // Elapsed Call Timer
@@ -102,19 +99,7 @@ export default function VoiceInterviewRoom({
         .eq("id", roomId)
         .single();
 
-      let targetData: InterviewData | null = dbData;
-
-      // Fallback check sessionStorage if DB table was not populated yet
-      if (!targetData) {
-        const localData = sessionStorage.getItem(`interview_${roomId}`);
-        if (localData) {
-          try {
-            targetData = JSON.parse(localData);
-          } catch {
-            targetData = null;
-          }
-        }
-      }
+      const targetData: InterviewData | null = dbData;
 
       if (!targetData) {
         setUnauthorized(true);
@@ -161,14 +146,14 @@ export default function VoiceInterviewRoom({
 
   // 2. Elapsed call timer (counts up)
   useEffect(() => {
-    if (loading || unauthorized || speakerState === "ended" || isPaused) return;
+    if (loading || unauthorized || speakerState === "ended") return;
 
     const interval = setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [loading, unauthorized, speakerState, isPaused]);
+  }, [loading, unauthorized, speakerState]);
 
   // Auto-scroll transcript feed
   useEffect(() => {
@@ -180,16 +165,6 @@ export default function VoiceInterviewRoom({
     const nextMuted = !isMuted;
     setIsMuted(nextMuted);
     if (nextMuted && speakerState === "candidate_speaking") {
-      setSpeakerState("listening");
-    }
-  };
-
-  // Toggle Pause
-  const handleTogglePause = () => {
-    setIsPaused((prev) => !prev);
-    if (!isPaused) {
-      setSpeakerState("paused");
-    } else {
       setSpeakerState("listening");
     }
   };
@@ -330,30 +305,40 @@ export default function VoiceInterviewRoom({
 
           {/* Equalizer Audio Wave Visualizer */}
           <div className="flex items-center gap-1.5 h-12">
-            {[0.4, 0.7, 1.0, 0.6, 0.8, 0.3].map((heightFactor, idx) => (
-              <motion.div
-                key={idx}
-                animate={
-                  speakerState === "ai_speaking"
-                    ? { height: ["12px", `${heightFactor * 44}px`, "12px"] }
-                    : speakerState === "candidate_speaking" && !isMuted
-                    ? { height: ["8px", `${heightFactor * 32}px`, "8px"] }
-                    : { height: "6px" }
-                }
-                transition={{
-                  repeat: Infinity,
-                  duration: 0.6 + idx * 0.1,
-                  ease: "easeInOut",
-                }}
-                className={`w-1.5 rounded-full ${
-                  speakerState === "ai_speaking"
-                    ? "bg-primary shadow-[0_0_12px_var(--color-primary)]"
-                    : speakerState === "candidate_speaking" && !isMuted
-                    ? "bg-emerald-400"
-                    : "bg-zinc-800"
-                }`}
-              />
-            ))}
+            {[0.4, 0.7, 1.0, 0.6, 0.8, 0.3].map((heightFactor, idx) => {
+              const isAiSpeaking = speakerState === "ai_speaking";
+              const isCandidateSpeaking = speakerState === "candidate_speaking" && !isMuted;
+              const isMoving = isAiSpeaking || isCandidateSpeaking;
+
+              return (
+                <motion.div
+                  key={idx}
+                  animate={
+                    isAiSpeaking
+                      ? { height: ["12px", `${heightFactor * 44}px`, "12px"] }
+                      : isCandidateSpeaking
+                      ? { height: ["8px", `${heightFactor * 32}px`, "8px"] }
+                      : { height: "6px" }
+                  }
+                  transition={
+                    isMoving
+                      ? {
+                          repeat: Infinity,
+                          duration: 0.6 + idx * 0.1,
+                          ease: "easeInOut",
+                        }
+                      : { duration: 0.2 }
+                  }
+                  className={`w-1.5 rounded-full transition-colors ${
+                    isAiSpeaking
+                      ? "bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.6)]"
+                      : isCandidateSpeaking
+                      ? "bg-zinc-400 shadow-[0_0_8px_rgba(161,161,170,0.4)]"
+                      : "bg-zinc-800"
+                  }`}
+                />
+              );
+            })}
           </div>
 
           {/* Speaker State Indicator Pill */}
@@ -361,20 +346,17 @@ export default function VoiceInterviewRoom({
             <span
               className={`size-2.5 rounded-full ${
                 speakerState === "ai_speaking"
-                  ? "bg-primary animate-ping"
-                  : speakerState === "candidate_speaking"
-                  ? "bg-emerald-400 animate-pulse"
-                  : speakerState === "paused"
-                  ? "bg-amber-400"
+                  ? "bg-emerald-500 animate-ping"
+                  : speakerState === "candidate_speaking" && !isMuted
+                  ? "bg-zinc-400 animate-pulse"
                   : "bg-zinc-600"
               }`}
             />
             <span>
               {speakerState === "connecting" && "Initializing AI Connection..."}
               {speakerState === "ai_speaking" && "AI Interviewer Speaking..."}
-              {speakerState === "candidate_speaking" && "Candidate Speaking..."}
+              {speakerState === "candidate_speaking" && (isMuted ? "Microphone Muted" : "Candidate Speaking...")}
               {speakerState === "listening" && (isMuted ? "Microphone Muted" : "Listening for your response...")}
-              {speakerState === "paused" && "Interview Paused"}
               {speakerState === "ended" && "Interview Completed"}
             </span>
           </div>
@@ -451,16 +433,6 @@ export default function VoiceInterviewRoom({
             title={isMuted ? "Unmute Mic" : "Mute Mic"}
           >
             {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
-          </button>
-
-          {/* Pause / Resume Toggle */}
-          <button
-            type="button"
-            onClick={handleTogglePause}
-            className="size-14 rounded-2xl border border-zinc-800 bg-zinc-900 text-white hover:bg-zinc-800 flex items-center justify-center transition-colors"
-            title={isPaused ? "Resume Interview" : "Pause Interview"}
-          >
-            {isPaused ? <Play className="w-6 h-6 text-emerald-400" /> : <Pause className="w-6 h-6" />}
           </button>
 
           {/* End Session Button */}
