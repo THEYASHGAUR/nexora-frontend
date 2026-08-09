@@ -51,7 +51,13 @@ export default function VoiceInterviewRoom({
   // Room & Auth states
   const [interview, setInterview] = useState<InterviewData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMsg, setLoadingMsg] = useState("Connecting to Voice Room...");
   const [unauthorized, setUnauthorized] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+
+  // LiveKit connection state
+  const [livekitToken, setLivekitToken] = useState<string | null>(null);
+  const [livekitUrl, setLivekitUrl] = useState<string | null>(null);
 
   // Audio Controls & State
   const [speakerState, setSpeakerState] = useState<
@@ -92,53 +98,96 @@ export default function VoiceInterviewRoom({
         return;
       }
 
-      // Query Supabase for this room
-      const { data: dbData } = await supabase
-        .from("interviews")
-        .select("*")
-        .eq("id", roomId)
-        .single();
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8009";
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      const authToken = authSession?.access_token;
 
-      const targetData: InterviewData | null = dbData;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      };
 
-      if (!targetData) {
-        setUnauthorized(true);
-        setLoading(false);
-        return;
+      // Step 1: Load session from V1 backend
+      setLoadingMsg("Loading your interview session...");
+      try {
+        const sessionRes = await fetch(`${backendUrl}/interviews/${roomId}`, { headers });
+
+        if (sessionRes.status === 404) {
+          setUnauthorized(true);
+          setLoading(false);
+          return;
+        }
+
+        if (!sessionRes.ok) {
+          setSessionError("Failed to load interview session from backend.");
+          setLoading(false);
+          return;
+        }
+
+        const sessionData = await sessionRes.json();
+
+        // Verify ownership via user_id from backend
+        if (sessionData.user_id && sessionData.user_id !== user.id) {
+          setUnauthorized(true);
+          setLoading(false);
+          return;
+        }
+
+        const interviewData: InterviewData = {
+          id: roomId,
+          user_id: user.id,
+          role: sessionData.role || "",
+          experience_level: sessionData.experience_level || "",
+          interview_type: sessionData.interview_type || "",
+          duration_minutes: sessionData.duration_minutes || 30,
+          status: sessionData.status,
+        };
+        setInterview(interviewData);
+
+        // Step 2: Get LiveKit token from V1 backend
+        setLoadingMsg("Starting AI voice session...");
+        const startRes = await fetch(`${backendUrl}/interviews/${roomId}/start`, {
+          method: "POST",
+          headers,
+        });
+
+        if (startRes.ok) {
+          const startData = await startRes.json();
+          if (startData.token && !startData._dev_mode) {
+            setLivekitToken(startData.token);
+            setLivekitUrl(startData.livekit_url);
+          }
+          // If dev_mode, LiveKit is not configured — proceed to room in demo mode
+        }
+
+      } catch (err) {
+        console.warn("Backend session load error:", err);
+        // Fallback: allow room entry with minimal data (demo/offline mode)
+        setInterview({
+          id: roomId,
+          user_id: user.id,
+          role: "Interview",
+          experience_level: "",
+          interview_type: "Technical Round",
+          duration_minutes: 30,
+        });
       }
 
-      // Verify strict ownership: roomId must belong to authenticated candidate
-      if (targetData.user_id !== user.id) {
-        setUnauthorized(true);
-        setLoading(false);
-        return;
-      }
-
-      setInterview(targetData);
       setLoading(false);
 
-      // Simulate AI connection & initial greeting question
+      // Simulate AI connection after loading
       setTimeout(() => {
         setSpeakerState("ai_speaking");
-        const greetingText = `Hello! Welcome to your ${targetData.interview_type} for the ${targetData.role} position. I've analyzed your resume and the job description. To start off, could you briefly introduce yourself and share what interests you most about this role?`;
-        
         setTranscript([
           {
             id: crypto.randomUUID(),
             speaker: "interviewer",
-            text: greetingText,
-            timestamp: new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
+            text: "Hello! Welcome to your Nexora AI interview. I've analyzed your background and the role requirements. Let's get started — could you begin by briefly introducing yourself?",
+            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           },
         ]);
-
-        // After AI greeting finishes speaking, switch to candidate listening mode
-        setTimeout(() => {
-          setSpeakerState("listening");
-        }, 5000);
-      }, 1800);
+        setTimeout(() => setSpeakerState("listening"), 5000);
+      }, 1500);
     }
 
     verifyAndLoadRoom();
@@ -169,26 +218,30 @@ export default function VoiceInterviewRoom({
     }
   };
 
-  // End Interview & Save session metrics to Supabase
+  // End Interview — call V1 backend to end session and trigger report generation
   const handleEndInterview = async () => {
     setSpeakerState("ended");
     setShowEndModal(false);
 
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8009";
     const supabase = createClient();
+    const { data: { session: authSession } } = await supabase.auth.getSession();
+    const authToken = authSession?.access_token;
+
     try {
-      await supabase
-        .from("interviews")
-        .update({
-          status: "completed",
-          actual_duration_seconds: elapsedSeconds,
-          finished_at: new Date().toISOString(),
-        })
-        .eq("id", roomId);
+      // V1: End session + trigger background report generation
+      await fetch(`${backendUrl}/interviews/${roomId}/end`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+      });
     } catch (err) {
-      console.warn("Could not save completion timestamp to DB:", err);
+      console.warn("Could not call end interview endpoint:", err);
     }
 
-    // Redirect candidate to report page
+    // Redirect to report page — it will poll until report is ready
     router.push(`/reports/${roomId}`);
   };
 
@@ -206,8 +259,23 @@ export default function VoiceInterviewRoom({
           <div className="absolute inset-0 border-4 border-primary rounded-full border-t-transparent animate-spin" />
           <Sparkles className="w-6 h-6 text-primary" />
         </div>
-        <h2 className="text-xl font-bold">Connecting to Voice Room...</h2>
-        <p className="text-zinc-500 text-sm mt-1">Verifying candidate credentials and loading AI context</p>
+        <h2 className="text-xl font-bold">{loadingMsg}</h2>
+        <p className="text-zinc-500 text-sm mt-1">Setting up your personalized AI interview session</p>
+      </div>
+    );
+  }
+
+  if (sessionError) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center px-4">
+        <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-3xl p-8 text-center">
+          <AlertTriangle className="w-10 h-10 text-destructive mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-white mb-2">Session Error</h2>
+          <p className="text-zinc-400 text-sm mb-6">{sessionError}</p>
+          <Link href="/ai-mock-interview" className="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-semibold rounded-xl transition-colors inline-flex items-center gap-2">
+            <ChevronLeft className="w-4 h-4" /> Back to Setup
+          </Link>
+        </div>
       </div>
     );
   }

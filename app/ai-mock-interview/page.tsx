@@ -42,8 +42,12 @@ export default function AIInterviewSetup() {
   >("Technical Round");
   const [isTypeOpen, setIsTypeOpen] = useState(false);
 
+  // Difficulty selection
+  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium");
+
   // Error/Loading states
   const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const roleOptions = [
@@ -173,6 +177,7 @@ export default function AIInterviewSetup() {
     if (!jobDescription || !resume) return;
 
     setLoading(true);
+    setLoadingStep("");
     setErrorMsg(null);
 
     const supabase = createClient();
@@ -185,11 +190,11 @@ export default function AIInterviewSetup() {
       return;
     }
 
-    // 1. Microphone Access Check
+    // Step 1: Microphone Access Check
+    setLoadingStep("Requesting microphone access...");
     try {
       if (typeof window !== "undefined" && navigator.mediaDevices?.getUserMedia) {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // Stop audio tracks after verifying browser permission
         stream.getTracks().forEach((track) => track.stop());
       } else {
         throw new Error("Microphone API not supported in this browser environment");
@@ -197,47 +202,58 @@ export default function AIInterviewSetup() {
     } catch (micErr: unknown) {
       console.error("Microphone access check failed:", micErr);
       setErrorMsg(
-        "Microphone access is required to take the AI voice interview. Please grant microphone access permissions in your browser and try again."
+        "Microphone access is required for the AI voice interview. Please grant microphone permissions in your browser settings and try again."
       );
       setLoading(false);
       return;
     }
 
-    // 2. Verify Backend API Keys (OpenAI, Deepgram, LiveKit)
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8009";
 
+    // Step 2: Verify Backend API Keys
+    setLoadingStep("Verifying backend credentials...");
     try {
       const verifyRes = await fetch(`${backendUrl}/interview/verify-keys`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
 
-      const verifyData = await verifyRes.json();
+      if (!verifyRes.ok) {
+        let errMsg = "Backend credential check failed.";
+        try {
+          const errData = await verifyRes.json();
+          errMsg = errData?.detail?.error || errData?.error || errData?.detail || errMsg;
+        } catch (_) {}
+        setErrorMsg(errMsg + " Please configure all keys in nexora-backend/.env");
+        setLoading(false);
+        return;
+      }
 
-      if (!verifyRes.ok || !verifyData.success) {
+      const verifyData = await verifyRes.json();
+      if (!verifyData.success) {
         setErrorMsg(
           verifyData.error ||
-            "Backend credential check failed. Please ensure valid OpenAI, Deepgram, and LiveKit keys are set in nexora-backend/.env"
+            "Backend credential check failed. Please ensure valid OpenAI, Deepgram, and LiveKit keys are configured."
         );
         setLoading(false);
         return;
       }
     } catch (err: unknown) {
-      console.error("Backend API verification call error:", err);
+      console.error("Backend API verification error:", err);
       setErrorMsg(
-        "Backend credential check failed. Unable to reach backend server at " +
-          backendUrl +
-          ". Please ensure nexora-backend server is running and keys are configured."
+        `Cannot reach backend server at ${backendUrl}. Please ensure the nexora-backend server is running.`
       );
       setLoading(false);
-      return; // Stop execution: DO NOT enter room if verify-keys fails!
+      return;
     }
 
-    // 3. Create Interview Room & Navigate
-    const interviewId = crypto.randomUUID();
+    // Step 3: Get Supabase auth token
+    const { data: { session: authSession } } = await supabase.auth.getSession();
+    const authToken = authSession?.access_token;
 
+    // Step 4: Send to V1 /interviews endpoint (parse + plan)
+    setLoadingStep("Analysing your resume and JD...");
     try {
-      // Ensure inputs are strictly sanitized of null bytes before sending to Supabase
       const cleanResume = (resume || "")
         .replace(/\0/g, "")
         .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ");
@@ -245,35 +261,52 @@ export default function AIInterviewSetup() {
         .replace(/\0/g, "")
         .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ");
 
-      const { error } = await supabase.from("interviews").insert([
-        {
-          id: interviewId,
-          user_id: user.id,
-          role,
-          experience_level: experienceLevel,
-          interview_type: selectedTypeObj.name,
-          duration_minutes: selectedTypeObj.approxMinutes,
-          job_description: cleanJd,
-          resume_text: cleanResume,
-          status: "scheduled",
-          created_at: new Date().toISOString(),
+      const createRes = await fetch(`${backendUrl}/interviews`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         },
-      ]);
+        body: JSON.stringify({
+          role,
+          interview_type: selectedTypeObj.name,
+          experience_level: experienceLevel,
+          difficulty,
+          duration_minutes: selectedTypeObj.approxMinutes,
+          resume_text: cleanResume,
+          jd_text: cleanJd,
+        }),
+      });
 
-      if (error) {
-        console.error("Supabase interview room creation error:", error);
-        setErrorMsg(`Failed to create interview session: ${error.message || "Database insert error"}`);
+      if (!createRes.ok) {
+        let errMsg = "Failed to prepare interview session.";
+        try {
+          const errData = await createRes.json();
+          errMsg = errData?.detail || errData?.error || errMsg;
+        } catch (_) {}
+        setErrorMsg(errMsg);
         setLoading(false);
-        return; // STOP! DO NOT enter room on error!
+        return;
       }
 
-      router.push(`/ai-mock-interview/room/${interviewId}`);
+      const createData = await createRes.json();
+      const sessionId = createData.session_id;
+
+      if (!sessionId) {
+        setErrorMsg("Backend did not return a valid session ID. Please try again.");
+        setLoading(false);
+        return;
+      }
+
+      // Step 5: Navigate to interview room with backend session_id
+      setLoadingStep("Interview ready! Entering room...");
+      router.push(`/ai-mock-interview/room/${sessionId}`);
+
     } catch (err: unknown) {
-      console.error("Error creating interview room:", err);
+      console.error("Error creating interview session:", err);
       const msg = err instanceof Error ? err.message : "Failed to create interview session.";
-      setErrorMsg(`Could not start interview room: ${msg}`);
+      setErrorMsg(`Could not start interview: ${msg}`);
       setLoading(false);
-      return; // STOP! DO NOT enter room on error!
     }
   };
 
@@ -450,6 +483,34 @@ export default function AIInterviewSetup() {
               </div>
             </div>
 
+            {/* Difficulty Selector */}
+            <div className="px-6 md:px-8 pb-6 border-b border-zinc-800">
+              <label className="flex items-center gap-2 text-xs font-bold text-zinc-300 mb-3 uppercase tracking-wider">
+                <Sparkles className="w-3.5 h-3.5 text-zinc-400" />
+                Difficulty Level
+              </label>
+              <div className="grid grid-cols-3 gap-3">
+                {(["easy", "medium", "hard"] as const).map((level) => (
+                  <button
+                    key={level}
+                    type="button"
+                    onClick={() => setDifficulty(level)}
+                    className={`px-4 py-3 rounded-2xl border text-sm font-semibold transition-all capitalize ${
+                      difficulty === level
+                        ? level === "easy"
+                          ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-300 shadow-lg shadow-emerald-500/10"
+                          : level === "medium"
+                          ? "border-amber-500/60 bg-amber-500/15 text-amber-300 shadow-lg shadow-amber-500/10"
+                          : "border-red-500/60 bg-red-500/15 text-red-300 shadow-lg shadow-red-500/10"
+                        : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-300"
+                    }`}
+                  >
+                    {level === "easy" ? "🟢 Easy" : level === "medium" ? "🟡 Medium" : "🔴 Hard"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* JD and Resume Upload Inputs */}
             <div className="grid md:grid-cols-2 gap-8 p-6 md:p-8">
               {/* Job Description */}
@@ -572,10 +633,13 @@ export default function AIInterviewSetup() {
                 className="w-full sm:w-auto px-8 py-3.5 bg-brand-gradient hover:opacity-95 disabled:opacity-50 disabled:cursor-not-allowed text-primary-foreground font-semibold rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2.5 active:scale-[0.98]"
               >
                 {loading ? (
-                  <svg className="size-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
+                  <>
+                    <svg className="size-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span className="truncate max-w-[200px]">{loadingStep || "Preparing..."}</span>
+                  </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4" />
