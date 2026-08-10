@@ -18,6 +18,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { Room, RoomEvent, Track } from "livekit-client";
 
 interface InterviewData {
   id: string;
@@ -73,6 +74,7 @@ export default function VoiceInterviewRoom({
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
 
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const livekitRoomRef = useRef<Room | null>(null);
 
   // Helper for approx duration label
   const getTargetDurationLabel = (type?: string) => {
@@ -157,7 +159,9 @@ export default function VoiceInterviewRoom({
             setLivekitToken(startData.token);
             setLivekitUrl(startData.livekit_url);
           }
-          // If dev_mode, LiveKit is not configured — proceed to room in demo mode
+          else setSessionError("The voice service is not configured. Please try again after the backend LiveKit credentials are set.");
+        } else {
+          setSessionError("Unable to start the voice room. Please try again.");
         }
 
       } catch (err) {
@@ -175,8 +179,8 @@ export default function VoiceInterviewRoom({
 
       setLoading(false);
 
-      // Simulate AI connection after loading
-      setTimeout(() => {
+      // The room is driven by LiveKit events. This remains disabled for local UI work.
+      if (livekitToken === "__demo_mode__") setTimeout(() => {
         setSpeakerState("ai_speaking");
         setTranscript([
           {
@@ -192,6 +196,48 @@ export default function VoiceInterviewRoom({
 
     verifyAndLoadRoom();
   }, [roomId, router]);
+
+  useEffect(() => {
+    if (!livekitToken || !livekitUrl) return;
+    const room = new Room();
+    livekitRoomRef.current = room;
+    const audioElements: HTMLMediaElement[] = [];
+    room.on(RoomEvent.TrackSubscribed, (track) => {
+      if (track.kind === Track.Kind.Audio) {
+        const element = track.attach() as HTMLMediaElement;
+        element.autoplay = true;
+        document.body.appendChild(element);
+        audioElements.push(element);
+      }
+    });
+    room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => setSpeakerState(speakers.length ? "ai_speaking" : "listening"));
+    room.on(RoomEvent.TranscriptionReceived, ((segments: Array<{ text?: string; final?: boolean }>, participant?: { identity?: string }) => {
+      const complete = segments.filter((segment) => segment.final !== false && segment.text?.trim());
+      if (!complete.length) return;
+      setTranscript((items) => [...items, ...complete.map((segment) => ({
+        id: crypto.randomUUID(),
+        speaker: (participant?.identity === room.localParticipant.identity ? "candidate" : "interviewer") as TranscriptItem["speaker"],
+        text: segment.text!.trim(),
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      }))]);
+    }) as never);
+    void (async () => {
+      try {
+        await room.connect(livekitUrl, livekitToken);
+        await room.startAudio();
+        await room.localParticipant.setMicrophoneEnabled(true);
+        setSpeakerState("listening");
+      } catch (error) {
+        console.error("LiveKit connection failed:", error);
+        setSessionError("Could not connect to the voice room. Check microphone permission and try again.");
+      }
+    })();
+    return () => {
+      audioElements.forEach((element) => element.remove());
+      room.disconnect();
+      livekitRoomRef.current = null;
+    };
+  }, [livekitToken, livekitUrl]);
 
   // 2. Elapsed call timer (counts up)
   useEffect(() => {
@@ -213,6 +259,7 @@ export default function VoiceInterviewRoom({
   const handleToggleMute = () => {
     const nextMuted = !isMuted;
     setIsMuted(nextMuted);
+    void livekitRoomRef.current?.localParticipant.setMicrophoneEnabled(!nextMuted);
     if (nextMuted && speakerState === "candidate_speaking") {
       setSpeakerState("listening");
     }
@@ -222,6 +269,7 @@ export default function VoiceInterviewRoom({
   const handleEndInterview = async () => {
     setSpeakerState("ended");
     setShowEndModal(false);
+    livekitRoomRef.current?.disconnect();
 
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8009";
     const supabase = createClient();

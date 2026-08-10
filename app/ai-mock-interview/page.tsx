@@ -174,8 +174,6 @@ export default function AIInterviewSetup() {
   };
 
   const handleStartInterview = async () => {
-    if (!jobDescription || !resume) return;
-
     setLoading(true);
     setLoadingStep("");
     setErrorMsg(null);
@@ -629,7 +627,7 @@ export default function AIInterviewSetup() {
               <button
                 type="button"
                 onClick={handleStartInterview}
-                disabled={!jobDescription || !resume || loading}
+                disabled={loading}
                 className="w-full sm:w-auto px-8 py-3.5 bg-brand-gradient hover:opacity-95 disabled:opacity-50 disabled:cursor-not-allowed text-primary-foreground font-semibold rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2.5 active:scale-[0.98]"
               >
                 {loading ? (

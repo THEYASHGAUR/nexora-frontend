@@ -200,6 +200,8 @@ export default function CandidateScoreReport({
   const recommendation = (rd.recommendation as string) ?? "Needs Improvement";
   const technicalScore = (rd.technical_score as number) ?? 0;
   const communicationScore = (rd.communication_score as number) ?? 0;
+  const confidenceScore = (rd.confidence_score as number) ?? 0;
+  const behavioralScore = (rd.behavioral_score as number) ?? 0;
   const problemSolvingScore = (rd.problem_solving_score as number) ?? 0;
   const jdMatchScore = (rd.jd_match_score as number) ?? 0;
   const strengths = (rd.strengths as Array<{area: string; detail: string}>) ?? [];
@@ -379,6 +381,22 @@ export default function CandidateScoreReport({
               </div>
 
               {/* Skill Item 4 */}
+              <div>
+                <div className="flex justify-between text-xs font-semibold mb-2">
+                  <span className="text-zinc-300 flex items-center gap-2"><MessageSquare className="w-4 h-4 text-pink-400" />Confidence</span>
+                  <span className="text-white">{confidenceScore}%</span>
+                </div>
+                <div className="h-2.5 w-full bg-zinc-800 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-pink-500 to-rose-500 rounded-full" style={{ width: `${confidenceScore}%` }} /></div>
+              </div>
+
+              <div>
+                <div className="flex justify-between text-xs font-semibold mb-2">
+                  <span className="text-zinc-300 flex items-center gap-2"><Brain className="w-4 h-4 text-violet-400" />Behavioral Skills</span>
+                  <span className="text-white">{behavioralScore}%</span>
+                </div>
+                <div className="h-2.5 w-full bg-zinc-800 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full" style={{ width: `${behavioralScore}%` }} /></div>
+              </div>
+
               <div>
                 <div className="flex justify-between text-xs font-semibold mb-2">
                   <span className="text-zinc-300 flex items-center gap-2">
