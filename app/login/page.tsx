@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "motion/react";
@@ -8,7 +8,6 @@ import {
   AudioLines,
   Eye,
   EyeOff,
-  Github,
   Mail,
   ArrowRight,
   ShieldCheck,
@@ -31,15 +30,17 @@ function LoginContent() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [prevErrorParam, setPrevErrorParam] = useState<string | null>(null);
 
   const supabase = createClient();
 
-  useEffect(() => {
-    const errorParam = searchParams.get("error");
+  const errorParam = searchParams.get("error");
+  if (errorParam !== prevErrorParam) {
+    setPrevErrorParam(errorParam);
     if (errorParam) {
       setErrorMsg(decodeURIComponent(errorParam));
     }
-  }, [searchParams]);
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,30 +93,6 @@ function LoginContent() {
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred.";
-      setErrorMsg(message);
-      setLoading(false);
-    }
-  };
-
-  const handleOAuthLogin = async (provider: "google" | "github") => {
-    setLoading(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-        },
-      });
-
-      if (error) {
-        setErrorMsg(error.message);
-        setLoading(false);
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "OAuth sign in failed.";
       setErrorMsg(message);
       setLoading(false);
     }
@@ -208,7 +185,7 @@ function LoginContent() {
             )}
 
             {/* OAuth buttons */}
-            <div className="relative flex flex-col gap-3">
+            {/* <div className="relative flex flex-col gap-3">
               <motion.button
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.99 }}
@@ -217,7 +194,7 @@ function LoginContent() {
                 onClick={() => handleOAuthLogin("google")}
                 className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary/70 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {/* Google SVG */}
+                
                 <svg viewBox="0 0 24 24" className="size-4 shrink-0">
                   <path
                     fill="#4285F4"
@@ -250,16 +227,16 @@ function LoginContent() {
                 <Github className="size-4 shrink-0" />
                 Continue with GitHub
               </motion.button>
-            </div>
+            </div> */}
 
             {/* Divider */}
-            <div className="relative my-6 flex items-center gap-4">
+            {/* <div className="relative my-6 flex items-center gap-4">
               <div className="h-px flex-1 bg-border" />
               <span className="text-[11px] tracking-wider text-muted-foreground uppercase">
                 or
               </span>
               <div className="h-px flex-1 bg-border" />
-            </div>
+            </div> */}
 
             {/* Email form */}
             <form onSubmit={handleSubmit} className="relative flex flex-col gap-4">
@@ -321,7 +298,7 @@ function LoginContent() {
                   </label>
                   {mode === "login" && (
                     <Link
-                      href="#"
+                      href="/forgot-password"
                       className="text-xs text-muted-foreground transition-colors hover:text-foreground"
                     >
                       Forgot password?

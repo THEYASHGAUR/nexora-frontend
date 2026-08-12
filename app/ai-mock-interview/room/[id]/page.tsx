@@ -8,8 +8,6 @@ import {
   Mic,
   MicOff,
   PhoneOff,
-  Pause,
-  Play,
   Clock,
   ShieldAlert,
   Sparkles,
@@ -20,6 +18,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { Room, RoomEvent, Track } from "livekit-client";
 
 interface InterviewData {
   id: string;
@@ -53,14 +52,19 @@ export default function VoiceInterviewRoom({
   // Room & Auth states
   const [interview, setInterview] = useState<InterviewData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMsg, setLoadingMsg] = useState("Connecting to Voice Room...");
   const [unauthorized, setUnauthorized] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+
+  // LiveKit connection state
+  const [livekitToken, setLivekitToken] = useState<string | null>(null);
+  const [livekitUrl, setLivekitUrl] = useState<string | null>(null);
 
   // Audio Controls & State
   const [speakerState, setSpeakerState] = useState<
-    "connecting" | "ai_speaking" | "candidate_speaking" | "listening" | "paused" | "ended"
+    "connecting" | "ai_speaking" | "candidate_speaking" | "listening" | "ended"
   >("connecting");
   const [isMuted, setIsMuted] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
 
   // Elapsed Call Timer
@@ -70,6 +74,7 @@ export default function VoiceInterviewRoom({
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
 
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const livekitRoomRef = useRef<Room | null>(null);
 
   // Helper for approx duration label
   const getTargetDurationLabel = (type?: string) => {
@@ -95,80 +100,155 @@ export default function VoiceInterviewRoom({
         return;
       }
 
-      // Query Supabase for this room
-      const { data: dbData } = await supabase
-        .from("interviews")
-        .select("*")
-        .eq("id", roomId)
-        .single();
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8009";
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      const authToken = authSession?.access_token;
 
-      let targetData: InterviewData | null = dbData;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      };
 
-      // Fallback check sessionStorage if DB table was not populated yet
-      if (!targetData) {
-        const localData = sessionStorage.getItem(`interview_${roomId}`);
-        if (localData) {
-          try {
-            targetData = JSON.parse(localData);
-          } catch {
-            targetData = null;
-          }
+      // Step 1: Load session from V1 backend
+      setLoadingMsg("Loading your interview session...");
+      try {
+        const sessionRes = await fetch(`${backendUrl}/interviews/${roomId}`, { headers });
+
+        if (sessionRes.status === 404) {
+          setUnauthorized(true);
+          setLoading(false);
+          return;
         }
+
+        if (!sessionRes.ok) {
+          setSessionError("Failed to load interview session from backend.");
+          setLoading(false);
+          return;
+        }
+
+        const sessionData = await sessionRes.json();
+
+        // Verify ownership via user_id from backend
+        if (sessionData.user_id && sessionData.user_id !== user.id) {
+          setUnauthorized(true);
+          setLoading(false);
+          return;
+        }
+
+        const interviewData: InterviewData = {
+          id: roomId,
+          user_id: user.id,
+          role: sessionData.role || "",
+          experience_level: sessionData.experience_level || "",
+          interview_type: sessionData.interview_type || "",
+          duration_minutes: sessionData.duration_minutes || 30,
+          status: sessionData.status,
+        };
+        setInterview(interviewData);
+
+        // Step 2: Get LiveKit token from V1 backend
+        setLoadingMsg("Starting AI voice session...");
+        const startRes = await fetch(`${backendUrl}/interviews/${roomId}/start`, {
+          method: "POST",
+          headers,
+        });
+
+        if (startRes.ok) {
+          const startData = await startRes.json();
+          if (startData.token && !startData._dev_mode) {
+            setLivekitToken(startData.token);
+            setLivekitUrl(startData.livekit_url);
+          }
+          else setSessionError("The voice service is not configured. Please try again after the backend LiveKit credentials are set.");
+        } else {
+          setSessionError("Unable to start the voice room. Please try again.");
+        }
+
+      } catch (err) {
+        console.warn("Backend session load error:", err);
+        // Fallback: allow room entry with minimal data (demo/offline mode)
+        setInterview({
+          id: roomId,
+          user_id: user.id,
+          role: "Interview",
+          experience_level: "",
+          interview_type: "Technical Round",
+          duration_minutes: 30,
+        });
       }
 
-      if (!targetData) {
-        setUnauthorized(true);
-        setLoading(false);
-        return;
-      }
-
-      // Verify strict ownership: roomId must belong to authenticated candidate
-      if (targetData.user_id !== user.id) {
-        setUnauthorized(true);
-        setLoading(false);
-        return;
-      }
-
-      setInterview(targetData);
       setLoading(false);
 
-      // Simulate AI connection & initial greeting question
-      setTimeout(() => {
+      // The room is driven by LiveKit events. This remains disabled for local UI work.
+      if (livekitToken === "__demo_mode__") setTimeout(() => {
         setSpeakerState("ai_speaking");
-        const greetingText = `Hello! Welcome to your ${targetData.interview_type} for the ${targetData.role} position. I've analyzed your resume and the job description. To start off, could you briefly introduce yourself and share what interests you most about this role?`;
-        
         setTranscript([
           {
             id: crypto.randomUUID(),
             speaker: "interviewer",
-            text: greetingText,
-            timestamp: new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
+            text: "Hello! Welcome to your Nexora AI interview. I've analyzed your background and the role requirements. Let's get started — could you begin by briefly introducing yourself?",
+            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           },
         ]);
-
-        // After AI greeting finishes speaking, switch to candidate listening mode
-        setTimeout(() => {
-          setSpeakerState("listening");
-        }, 5000);
-      }, 1800);
+        setTimeout(() => setSpeakerState("listening"), 5000);
+      }, 1500);
     }
 
     verifyAndLoadRoom();
   }, [roomId, router]);
 
+  useEffect(() => {
+    if (!livekitToken || !livekitUrl) return;
+    const room = new Room();
+    livekitRoomRef.current = room;
+    const audioElements: HTMLMediaElement[] = [];
+    room.on(RoomEvent.TrackSubscribed, (track) => {
+      if (track.kind === Track.Kind.Audio) {
+        const element = track.attach() as HTMLMediaElement;
+        element.autoplay = true;
+        document.body.appendChild(element);
+        audioElements.push(element);
+      }
+    });
+    room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => setSpeakerState(speakers.length ? "ai_speaking" : "listening"));
+    room.on(RoomEvent.TranscriptionReceived, ((segments: Array<{ text?: string; final?: boolean }>, participant?: { identity?: string }) => {
+      const complete = segments.filter((segment) => segment.final !== false && segment.text?.trim());
+      if (!complete.length) return;
+      setTranscript((items) => [...items, ...complete.map((segment) => ({
+        id: crypto.randomUUID(),
+        speaker: (participant?.identity === room.localParticipant.identity ? "candidate" : "interviewer") as TranscriptItem["speaker"],
+        text: segment.text!.trim(),
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      }))]);
+    }) as never);
+    void (async () => {
+      try {
+        await room.connect(livekitUrl, livekitToken);
+        await room.startAudio();
+        await room.localParticipant.setMicrophoneEnabled(true);
+        setSpeakerState("listening");
+      } catch (error) {
+        console.error("LiveKit connection failed:", error);
+        setSessionError("Could not connect to the voice room. Check microphone permission and try again.");
+      }
+    })();
+    return () => {
+      audioElements.forEach((element) => element.remove());
+      room.disconnect();
+      livekitRoomRef.current = null;
+    };
+  }, [livekitToken, livekitUrl]);
+
   // 2. Elapsed call timer (counts up)
   useEffect(() => {
-    if (loading || unauthorized || speakerState === "ended" || isPaused) return;
+    if (loading || unauthorized || speakerState === "ended") return;
 
     const interval = setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [loading, unauthorized, speakerState, isPaused]);
+  }, [loading, unauthorized, speakerState]);
 
   // Auto-scroll transcript feed
   useEffect(() => {
@@ -179,41 +259,37 @@ export default function VoiceInterviewRoom({
   const handleToggleMute = () => {
     const nextMuted = !isMuted;
     setIsMuted(nextMuted);
+    void livekitRoomRef.current?.localParticipant.setMicrophoneEnabled(!nextMuted);
     if (nextMuted && speakerState === "candidate_speaking") {
       setSpeakerState("listening");
     }
   };
 
-  // Toggle Pause
-  const handleTogglePause = () => {
-    setIsPaused((prev) => !prev);
-    if (!isPaused) {
-      setSpeakerState("paused");
-    } else {
-      setSpeakerState("listening");
-    }
-  };
-
-  // End Interview & Save session metrics to Supabase
+  // End Interview — call V1 backend to end session and trigger report generation
   const handleEndInterview = async () => {
     setSpeakerState("ended");
     setShowEndModal(false);
+    livekitRoomRef.current?.disconnect();
 
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8009";
     const supabase = createClient();
+    const { data: { session: authSession } } = await supabase.auth.getSession();
+    const authToken = authSession?.access_token;
+
     try {
-      await supabase
-        .from("interviews")
-        .update({
-          status: "completed",
-          actual_duration_seconds: elapsedSeconds,
-          finished_at: new Date().toISOString(),
-        })
-        .eq("id", roomId);
+      // V1: End session + trigger background report generation
+      await fetch(`${backendUrl}/interviews/${roomId}/end`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+      });
     } catch (err) {
-      console.warn("Could not save completion timestamp to DB:", err);
+      console.warn("Could not call end interview endpoint:", err);
     }
 
-    // Redirect candidate to report page
+    // Redirect to report page — it will poll until report is ready
     router.push(`/reports/${roomId}`);
   };
 
@@ -231,8 +307,23 @@ export default function VoiceInterviewRoom({
           <div className="absolute inset-0 border-4 border-primary rounded-full border-t-transparent animate-spin" />
           <Sparkles className="w-6 h-6 text-primary" />
         </div>
-        <h2 className="text-xl font-bold">Connecting to Voice Room...</h2>
-        <p className="text-zinc-500 text-sm mt-1">Verifying candidate credentials and loading AI context</p>
+        <h2 className="text-xl font-bold">{loadingMsg}</h2>
+        <p className="text-zinc-500 text-sm mt-1">Setting up your personalized AI interview session</p>
+      </div>
+    );
+  }
+
+  if (sessionError) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center px-4">
+        <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-3xl p-8 text-center">
+          <AlertTriangle className="w-10 h-10 text-destructive mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-white mb-2">Session Error</h2>
+          <p className="text-zinc-400 text-sm mb-6">{sessionError}</p>
+          <Link href="/ai-mock-interview" className="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-semibold rounded-xl transition-colors inline-flex items-center gap-2">
+            <ChevronLeft className="w-4 h-4" /> Back to Setup
+          </Link>
+        </div>
       </div>
     );
   }
@@ -330,30 +421,40 @@ export default function VoiceInterviewRoom({
 
           {/* Equalizer Audio Wave Visualizer */}
           <div className="flex items-center gap-1.5 h-12">
-            {[0.4, 0.7, 1.0, 0.6, 0.8, 0.3].map((heightFactor, idx) => (
-              <motion.div
-                key={idx}
-                animate={
-                  speakerState === "ai_speaking"
-                    ? { height: ["12px", `${heightFactor * 44}px`, "12px"] }
-                    : speakerState === "candidate_speaking" && !isMuted
-                    ? { height: ["8px", `${heightFactor * 32}px`, "8px"] }
-                    : { height: "6px" }
-                }
-                transition={{
-                  repeat: Infinity,
-                  duration: 0.6 + idx * 0.1,
-                  ease: "easeInOut",
-                }}
-                className={`w-1.5 rounded-full ${
-                  speakerState === "ai_speaking"
-                    ? "bg-primary shadow-[0_0_12px_var(--color-primary)]"
-                    : speakerState === "candidate_speaking" && !isMuted
-                    ? "bg-emerald-400"
-                    : "bg-zinc-800"
-                }`}
-              />
-            ))}
+            {[0.4, 0.7, 1.0, 0.6, 0.8, 0.3].map((heightFactor, idx) => {
+              const isAiSpeaking = speakerState === "ai_speaking";
+              const isCandidateSpeaking = speakerState === "candidate_speaking" && !isMuted;
+              const isMoving = isAiSpeaking || isCandidateSpeaking;
+
+              return (
+                <motion.div
+                  key={idx}
+                  animate={
+                    isAiSpeaking
+                      ? { height: ["12px", `${heightFactor * 44}px`, "12px"] }
+                      : isCandidateSpeaking
+                      ? { height: ["8px", `${heightFactor * 32}px`, "8px"] }
+                      : { height: "6px" }
+                  }
+                  transition={
+                    isMoving
+                      ? {
+                          repeat: Infinity,
+                          duration: 0.6 + idx * 0.1,
+                          ease: "easeInOut",
+                        }
+                      : { duration: 0.2 }
+                  }
+                  className={`w-1.5 rounded-full transition-colors ${
+                    isAiSpeaking
+                      ? "bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.6)]"
+                      : isCandidateSpeaking
+                      ? "bg-zinc-400 shadow-[0_0_8px_rgba(161,161,170,0.4)]"
+                      : "bg-zinc-800"
+                  }`}
+                />
+              );
+            })}
           </div>
 
           {/* Speaker State Indicator Pill */}
@@ -361,20 +462,17 @@ export default function VoiceInterviewRoom({
             <span
               className={`size-2.5 rounded-full ${
                 speakerState === "ai_speaking"
-                  ? "bg-primary animate-ping"
-                  : speakerState === "candidate_speaking"
-                  ? "bg-emerald-400 animate-pulse"
-                  : speakerState === "paused"
-                  ? "bg-amber-400"
+                  ? "bg-emerald-500 animate-ping"
+                  : speakerState === "candidate_speaking" && !isMuted
+                  ? "bg-zinc-400 animate-pulse"
                   : "bg-zinc-600"
               }`}
             />
             <span>
               {speakerState === "connecting" && "Initializing AI Connection..."}
               {speakerState === "ai_speaking" && "AI Interviewer Speaking..."}
-              {speakerState === "candidate_speaking" && "Candidate Speaking..."}
+              {speakerState === "candidate_speaking" && (isMuted ? "Microphone Muted" : "Candidate Speaking...")}
               {speakerState === "listening" && (isMuted ? "Microphone Muted" : "Listening for your response...")}
-              {speakerState === "paused" && "Interview Paused"}
               {speakerState === "ended" && "Interview Completed"}
             </span>
           </div>
@@ -451,16 +549,6 @@ export default function VoiceInterviewRoom({
             title={isMuted ? "Unmute Mic" : "Mute Mic"}
           >
             {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
-          </button>
-
-          {/* Pause / Resume Toggle */}
-          <button
-            type="button"
-            onClick={handleTogglePause}
-            className="size-14 rounded-2xl border border-zinc-800 bg-zinc-900 text-white hover:bg-zinc-800 flex items-center justify-center transition-colors"
-            title={isPaused ? "Resume Interview" : "Pause Interview"}
-          >
-            {isPaused ? <Play className="w-6 h-6 text-emerald-400" /> : <Pause className="w-6 h-6" />}
           </button>
 
           {/* End Session Button */}

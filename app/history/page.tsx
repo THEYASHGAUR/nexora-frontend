@@ -11,9 +11,7 @@ import {
   CheckCircle2,
   ArrowRight,
   Plus,
-  Sparkles,
   Bot,
-  User as UserIcon,
   ChevronRight,
   Play,
   Layers,
@@ -53,39 +51,16 @@ export default function CandidateInterviewHistory() {
 
       setUserEmail(user.email || "");
 
-      // Fetch user's interviews from Supabase
-      const { data, error } = await supabase
-        .from("interviews")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-
-      if (!error && data && data.length > 0) {
-        setInterviews(data);
+      const { data: { session } } = await supabase.auth.getSession();
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8009";
+      const response = await fetch(`${backendUrl}/interviews`, {
+        headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+      });
+      if (response.ok) {
+        const payload = await response.json();
+        setInterviews(payload.interviews || []);
       } else {
-        // Sample fallback list for demonstrating UI
-        setInterviews([
-          {
-            id: "sample-1",
-            user_id: user.id,
-            role: "Fullstack Developer",
-            experience_level: "Senior (5+ yrs)",
-            interview_type: "Technical Round",
-            actual_duration_seconds: 845,
-            created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-            status: "completed",
-          },
-          {
-            id: "sample-2",
-            user_id: user.id,
-            role: "Backend Engineer",
-            experience_level: "Mid-Level (2-5 yrs)",
-            interview_type: "HR Round",
-            actual_duration_seconds: 620,
-            created_at: new Date(Date.now() - 3600000 * 48).toISOString(),
-            status: "completed",
-          },
-        ]);
+        setInterviews([]);
       }
 
       setLoading(false);
