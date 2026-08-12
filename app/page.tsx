@@ -1057,33 +1057,74 @@ function Testimonials() {
 
 /* ---------------------------------- pricing --------------------------------- */
 
+type PricingRegion = "IN" | "US";
+
+const PRICING_REGIONS: { code: PricingRegion; label: string; flag: string }[] = [
+  { code: "IN", label: "India", flag: "🇮🇳" },
+  { code: "US", label: "US", flag: "🇺🇸" },
+];
+
 const PLANS = [
-  { name: "Free", price: "₹0", note: "Try one full interview", items: ["1 interview", "Basic report"], featured: false },
   {
-    name: "Starter",
-    price: "₹149",
-    note: "For focused prep sprints",
-    items: ["5 interview credits", "Detailed feedback", "Interview history"],
+    name: "Free",
+    price: { IN: "₹0", US: "$0" },
+    period: "forever",
+    note: "Start with the basics",
+    items: ["1 free interview", "Basic AI report", "Resume and JD matching"],
     featured: false,
+    cta: "Start Free",
   },
   {
-    name: "Pro",
-    price: "₹499",
-    note: "For serious job hunts",
-    items: ["Unlimited interviews", "Unlimited reports", "Advanced analytics", "Priority AI"],
+    name: "Pay Per Interview",
+    price: { IN: "₹40", US: "$0.42" },
+    period: "per interview",
+    note: "Buy only when you practice",
+    items: ["1 full voice interview", "Detailed scorecard", "Personal improvement plan"],
     featured: true,
+    cta: "Buy Interview",
+  },
+  {
+    name: "Enterprise",
+    price: { IN: "Custom", US: "Custom" },
+    period: "pricing",
+    note: "For teams and hiring programs",
+    items: ["Bulk candidate interviews", "HR analytics dashboard", "Custom reports and support"],
+    featured: false,
+    cta: "Contact Sales",
   },
 ];
 
 function Pricing() {
+  const [region, setRegion] = useState<PricingRegion>("IN");
+
   return (
     <section id="pricing" className="relative py-24 md:py-32">
       <div className="mx-auto max-w-6xl px-5">
         <SectionHeading
           eyebrow="Pricing"
-          title="Priced like practice, valued like a mentor."
-          sub="Start free. Upgrade only when you want unlimited rounds before the real thing."
+          title="Simple pricing for every interview prep journey."
+          sub="Start free, pay per interview, or build a custom plan for your hiring team."
         />
+        <div className="mt-8 flex justify-center">
+          <div className="inline-flex rounded-xl border border-border bg-surface/70 p-1">
+            {PRICING_REGIONS.map((item) => (
+              <button
+                key={item.code}
+                type="button"
+                aria-pressed={region === item.code}
+                onClick={() => setRegion(item.code)}
+                className={`flex min-w-24 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                  region === item.code
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span aria-hidden>{item.flag}</span>
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <motion.div
           variants={stagger}
           initial="hidden"
@@ -1108,8 +1149,10 @@ function Pricing() {
               ) : null}
               <h3 className="text-sm font-medium">{p.name}</h3>
               <p className="mt-3 text-4xl font-bold tracking-tight">
-                {p.price}
-                <span className="text-sm font-normal text-muted-foreground">/mo</span>
+                {p.price[region]}
+                <span className="text-sm font-normal text-muted-foreground">
+                  {p.price[region] === "Custom" ? "" : p.period === "forever" ? ` ${p.period}` : `/${p.period}`}
+                </span>
               </p>
               <p className="mt-1.5 text-xs text-muted-foreground">{p.note}</p>
               <ul className="mt-6 space-y-2.5">
@@ -1121,11 +1164,11 @@ function Pricing() {
               </ul>
               {p.featured ? (
                 <GradientButton href="/login" className="mt-7 w-full justify-center py-3">
-                  Get Pro
+                  {p.cta}
                 </GradientButton>
               ) : (
                 <GhostButton href="/login" className="mt-7 w-full justify-center py-3">
-                  Choose {p.name}
+                  {p.cta}
                 </GhostButton>
               )}
             </motion.div>
