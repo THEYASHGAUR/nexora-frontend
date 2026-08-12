@@ -221,7 +221,7 @@ export default function AIInterviewSetup() {
         try {
           const errData = await verifyRes.json();
           errMsg = errData?.detail?.error || errData?.error || errData?.detail || errMsg;
-        } catch (_) {}
+        } catch {}
         setErrorMsg(errMsg + " Please configure all keys in nexora-backend/.env");
         setLoading(false);
         return;
@@ -281,7 +281,7 @@ export default function AIInterviewSetup() {
         try {
           const errData = await createRes.json();
           errMsg = errData?.detail || errData?.error || errMsg;
-        } catch (_) {}
+        } catch {}
         setErrorMsg(errMsg);
         setLoading(false);
         return;

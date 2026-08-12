@@ -90,7 +90,7 @@ export default function CandidateScoreReport({
             status: sessionData.status,
           });
         }
-      } catch (_) {}
+      } catch {}
 
       // Poll for report readiness (report is generated async after interview ends)
       let attempts = 0;
@@ -126,7 +126,7 @@ export default function CandidateScoreReport({
 
           // Poll again in 3 seconds
           setTimeout(poll, 3000);
-        } catch (_) {
+        } catch {
           if (attempts >= maxAttempts) {
             setPolling(false);
             setLoading(false);

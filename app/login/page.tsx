@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "motion/react";
@@ -30,16 +30,17 @@ function LoginContent() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [prevErrorParam, setPrevErrorParam] = useState<string | null>(null);
 
   const supabase = createClient();
 
-  useEffect(() => {
-    const errorParam = searchParams.get("error");
+  const errorParam = searchParams.get("error");
+  if (errorParam !== prevErrorParam) {
+    setPrevErrorParam(errorParam);
     if (errorParam) {
-      const decoded = decodeURIComponent(errorParam);
-      queueMicrotask(() => setErrorMsg(decoded));
+      setErrorMsg(decodeURIComponent(errorParam));
     }
-  }, [searchParams]);
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
