@@ -48,6 +48,8 @@ function LoginContent() {
     setErrorMsg(null);
     setSuccessMsg(null);
 
+    const targetPath = searchParams.get("redirectTo") || "/ai-mock-interview";
+
     try {
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({
@@ -61,7 +63,7 @@ function LoginContent() {
           return;
         }
 
-        router.push("/ai-mock-interview");
+        router.push(targetPath);
         router.refresh();
       } else {
         const { data, error } = await supabase.auth.signUp({
@@ -82,11 +84,11 @@ function LoginContent() {
         }
 
         if (data.session) {
-          router.push("/ai-mock-interview");
+          router.push(targetPath);
           router.refresh();
         } else {
           setSuccessMsg(
-            "Account created! Please check your email to confirm your account."
+            "Account created successfully! Please check your email to confirm, or sign in."
           );
           setLoading(false);
         }
@@ -149,15 +151,15 @@ function LoginContent() {
             <div className="relative mb-8 text-center">
               <span className="inline-flex items-center gap-2 rounded-full border border-border bg-secondary/50 px-3 py-1 text-xs text-muted-foreground">
                 <Sparkles className="size-3 text-primary" />
-                {mode === "login" ? "Welcome back" : "Create your account"}
+                {mode === "login" ? "Welcome back" : "100% Free Account"}
               </span>
               <h1 className="mt-4 text-2xl font-bold tracking-tight md:text-3xl">
-                {mode === "login" ? "Sign in to Nexora" : "Start your journey"}
+                {mode === "login" ? "Sign in to Nexora" : "Start practicing for free"}
               </h1>
               <p className="mt-2 text-sm text-muted-foreground">
                 {mode === "login"
-                  ? "Continue your AI interview practice."
-                  : "Your first interview is free. No credit card required."}
+                  ? "Access your AI interviews, resume score & reports."
+                  : "All services are 100% free. No credit card required."}
               </p>
             </div>
 

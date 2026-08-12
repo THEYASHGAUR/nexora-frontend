@@ -16,7 +16,6 @@ import {
   AudioLines,
   Braces,
   BrainCircuit,
-  Building2,
   Check,
   ChevronDown,
   ClipboardList,
@@ -26,7 +25,6 @@ import {
   Mic,
   Minus,
   Play,
-  PlayCircle,
   Repeat,
   ShieldCheck,
   Sparkles,
@@ -35,6 +33,8 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 import {
   PolarAngleAxis,
   PolarGrid,
@@ -167,13 +167,37 @@ const NAV = [
 function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      subscription.unsubscribe();
+    };
   }, []);
+
+  const handleSignOut = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    setUser(null);
+  };
+
+  const displayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Account";
 
   return (
     <header
@@ -204,22 +228,34 @@ function Navbar() {
               {n.label}
             </a>
           ))}
-          {/* <a
-            href="#top"
-            className="flex items-center gap-1.5 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <Github className="size-4" /> Github
-          </a> */}
         </div>
 
         <div className="hidden items-center gap-2 md:flex">
-          {/* <a
-            href="/login"
-            className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Login
-          </a> */}
-          <GradientButton href="/login">Start Free Interview</GradientButton>
+          {user ? (
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium text-muted-foreground">
+                Hi, <strong className="text-foreground">{displayName}</strong>
+              </span>
+              <GradientButton href="/ai-mock-interview">Go to Dashboard</GradientButton>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="rounded-md border border-border px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <>
+              <a
+                href="/login"
+                className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Sign In
+              </a>
+              <GradientButton href="/login">Start Free Interview</GradientButton>
+            </>
+          )}
         </div>
 
         <button
@@ -235,21 +271,37 @@ function Navbar() {
       {open ? (
         <div className="border-t border-border bg-background/95 px-5 py-4 backdrop-blur-xl md:hidden">
           <div className="flex flex-col gap-1">
-            {[...NAV, { label: "Github", href: "#top" }, { label: "Login", href: "/login" }].map(
-              (n) => (
-                <a
-                  key={n.label}
-                  href={n.href}
-                  onClick={() => setOpen(false)}
-                  className="rounded-md px-2 py-2.5 text-sm text-muted-foreground"
+            {[...NAV, { label: "Sign In", href: "/login" }].map((n) => (
+              <a
+                key={n.label}
+                href={n.href}
+                onClick={() => setOpen(false)}
+                className="rounded-md px-2 py-2.5 text-sm text-muted-foreground"
+              >
+                {n.label}
+              </a>
+            ))}
+            {user ? (
+              <div className="mt-2 flex flex-col gap-2 border-t border-border pt-3">
+                <GradientButton href="/ai-mock-interview" className="justify-center">
+                  Go to Dashboard
+                </GradientButton>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    handleSignOut();
+                  }}
+                  className="rounded-md border border-border py-2 text-xs text-destructive"
                 >
-                  {n.label}
-                </a>
-              ),
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <GradientButton href="/login" className="mt-2 justify-center">
+                Start Free Interview
+              </GradientButton>
             )}
-            <GradientButton href="/login" className="mt-2 justify-center">
-              Start Free Interview
-            </GradientButton>
           </div>
         </div>
       ) : null}
@@ -597,12 +649,12 @@ const FEATURES = [
   { icon: Target, t: "Job Description Matching", d: "Questions weighted to the exact role." },
   { icon: Users, t: "Behavioral Interviews", d: "STAR-structured rounds with tone analysis." },
   { icon: Braces, t: "Technical Interviews", d: "DSA, system design, and language internals." },
-  { icon: Building2, t: "Company Specific", d: "Match the bar and style of your target company." },
+  // { icon: Building2, t: "Company Specific", d: "Match the bar and style of your target company." },
   { icon: ClipboardList, t: "Instant Interview Report", d: "A full breakdown seconds after you end." },
   { icon: Activity, t: "Weakness Detection", d: "Pinpoints the concepts that cost you points." },
   { icon: BrainCircuit, t: "Improvement Plan", d: "A personalized week-by-week practice path." },
   { icon: History, t: "Interview History", d: "Track every session and score over time." },
-  { icon: PlayCircle, t: "Interview Replay", d: "Replay audio with a synced annotated transcript." },
+  // { icon: PlayCircle, t: "Interview Replay", d: "Replay audio with a synced annotated transcript." },
 ];
 
 function Features() {
@@ -1066,31 +1118,31 @@ const PRICING_REGIONS: { code: PricingRegion; label: string; flag: string }[] = 
 
 const PLANS = [
   {
-    name: "Free",
+    name: "Free Access Plan",
     price: { IN: "₹0", US: "$0" },
     period: "forever",
-    note: "Start with the basics",
-    items: ["1 free interview", "Basic AI report", "Resume and JD matching"],
-    featured: false,
-    cta: "Start Free",
-  },
-  {
-    name: "Pay Per Interview",
-    price: { IN: "₹40", US: "$0.42" },
-    period: "per interview",
-    note: "Buy only when you practice",
-    items: ["1 full voice interview", "Detailed scorecard", "Personal improvement plan"],
+    note: "All features 100% free during early access",
+    items: ["Unlimited AI Voice Interviews", "Comprehensive Evaluation Reports", "Resume & JD Match Analyzer", "Interview Question Bank"],
     featured: true,
-    cta: "Buy Interview",
+    cta: "Start Free Practice",
   },
   {
-    name: "Enterprise",
-    price: { IN: "Custom", US: "Custom" },
-    period: "pricing",
-    note: "For teams and hiring programs",
-    items: ["Bulk candidate interviews", "HR analytics dashboard", "Custom reports and support"],
+    name: "Candidate Pro",
+    price: { IN: "₹0", US: "$0" },
+    period: "free for now",
+    note: "Full AI candidate toolkit",
+    items: ["Real-time audio speech evaluation", "Unlimited session history", "Personalized improvement plan", "Downloadable feedback PDF"],
     featured: false,
-    cta: "Contact Sales",
+    cta: "Get Started Free",
+  },
+  {
+    name: "Recruiter & HR Hub",
+    price: { IN: "₹0", US: "$0" },
+    period: "free for now",
+    note: "For recruiters & hiring managers",
+    items: ["HR Candidate Pipeline Dashboard", "Custom job role assessments", "Bulk candidate evaluation", "Exportable scorecards"],
+    featured: false,
+    cta: "Access Recruiter Hub",
   },
 ];
 
@@ -1102,8 +1154,8 @@ function Pricing() {
       <div className="mx-auto max-w-6xl px-5">
         <SectionHeading
           eyebrow="Pricing"
-          title="Simple pricing for every interview prep journey."
-          sub="Start free, pay per interview, or build a custom plan for your hiring team."
+          title="100% Free Early Access for All Candidates & Recruiters."
+          sub="Enjoy unlimited AI voice interviews, ATS resume analysis, and detailed feedback reports — completely free."
         />
         <div className="mt-8 flex justify-center">
           <div className="inline-flex rounded-xl border border-border bg-surface/70 p-1">
@@ -1314,7 +1366,7 @@ export default function NexoraLanding() {
         <WhyNexora />
         <ReportPreview />
         <Testimonials />
-        <Pricing />
+        {/* <Pricing /> */}
         <FAQ />
         <FinalCTA />
       </main>
