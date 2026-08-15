@@ -46,7 +46,7 @@ export default function Header() {
     { name: "Resume Analyzer", href: "/resume-analyzer" },
     { name: "Question Insights", href: "/interview-questions" },
     { name: "History & Reports", href: "/history" },
-    { name: "HR Dashboard", href: "/hr-dashboard" },
+    // { name: "HR Dashboard", href: "/hr-dashboard" },
   ];
 
   const displayName =

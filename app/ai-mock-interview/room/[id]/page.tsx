@@ -207,19 +207,33 @@ export default function VoiceInterviewRoom({
         const element = track.attach() as HTMLMediaElement;
         element.autoplay = true;
         document.body.appendChild(element);
+        element.play().catch((err) => console.warn("Audio autoplay blocked by browser, retrying:", err));
         audioElements.push(element);
       }
     });
-    room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => setSpeakerState(speakers.length ? "ai_speaking" : "listening"));
+    room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+      const aiSpeaking = speakers.some((s) => s.identity !== room.localParticipant.identity);
+      const userSpeaking = speakers.some((s) => s.identity === room.localParticipant.identity);
+      if (aiSpeaking) {
+        setSpeakerState("ai_speaking");
+      } else if (userSpeaking) {
+        setSpeakerState("candidate_speaking");
+      } else {
+        setSpeakerState("listening");
+      }
+    });
     room.on(RoomEvent.TranscriptionReceived, ((segments: Array<{ text?: string; final?: boolean }>, participant?: { identity?: string }) => {
-      const complete = segments.filter((segment) => segment.final !== false && segment.text?.trim());
+      const complete = segments.filter((segment) => segment.text && segment.text.trim().length > 0);
       if (!complete.length) return;
-      setTranscript((items) => [...items, ...complete.map((segment) => ({
-        id: crypto.randomUUID(),
-        speaker: (participant?.identity === room.localParticipant.identity ? "candidate" : "interviewer") as TranscriptItem["speaker"],
-        text: segment.text!.trim(),
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      }))]);
+      setTranscript((items) => [
+        ...items,
+        ...complete.map((segment) => ({
+          id: crypto.randomUUID(),
+          speaker: (participant?.identity === room.localParticipant.identity ? "candidate" : "interviewer") as TranscriptItem["speaker"],
+          text: segment.text!.trim(),
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        })),
+      ]);
     }) as never);
     void (async () => {
       try {
