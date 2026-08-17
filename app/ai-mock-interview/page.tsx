@@ -127,20 +127,18 @@ export default function AIInterviewSetup() {
     if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
       try {
         const formData = new FormData();
-        formData.append("resume", file);
-        formData.append("jd_text", jobDescription || "General candidate resume details");
+        formData.append("file", file);
         const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8009";
 
-        const res = await fetch(`${backendUrl}/analyze`, {
+        const res = await fetch(`${backendUrl}/extract-pdf`, {
           method: "POST",
           body: formData,
         });
 
         if (res.ok) {
           const data = await res.json();
-          if (data.analysis?.summary) {
-            const summaryText = `Resume File: ${file.name}\n\nSummary:\n${data.analysis.summary}\n\nStrengths:\n${(data.analysis.strengths || []).join("\n")}`;
-            setResume(summaryText);
+          if (data.text) {
+            setResume(data.text);
             return;
           }
         }

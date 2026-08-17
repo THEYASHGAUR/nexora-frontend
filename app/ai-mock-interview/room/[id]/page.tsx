@@ -73,6 +73,10 @@ export default function VoiceInterviewRoom({
   // Transcript Feed
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
 
+  // Pending (in-progress) transcript items per speaker — avoids creating new bubble per partial word
+  const pendingTranscriptRef = useRef<Map<string, string>>(new Map());
+  const pendingIdRef = useRef<Map<string, string>>(new Map());
+
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const livekitRoomRef = useRef<Room | null>(null);
 
@@ -222,18 +226,59 @@ export default function VoiceInterviewRoom({
         setSpeakerState("listening");
       }
     });
-    room.on(RoomEvent.TranscriptionReceived, ((segments: Array<{ text?: string; final?: boolean }>, participant?: { identity?: string }) => {
-      const complete = segments.filter((segment) => segment.text && segment.text.trim().length > 0);
-      if (!complete.length) return;
-      setTranscript((items) => [
-        ...items,
-        ...complete.map((segment) => ({
-          id: crypto.randomUUID(),
-          speaker: (participant?.identity === room.localParticipant.identity ? "candidate" : "interviewer") as TranscriptItem["speaker"],
-          text: segment.text!.trim(),
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        })),
-      ]);
+    room.on(RoomEvent.TranscriptionReceived, ((segments: Array<{ text?: string; final?: boolean; id?: string }>, participant?: { identity?: string }) => {
+      if (!segments.length) return;
+      const isLocal = participant?.identity === room.localParticipant.identity;
+      const speakerKey = participant?.identity ?? "unknown";
+      const speakerRole: TranscriptItem["speaker"] = isLocal ? "candidate" : "interviewer";
+      const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+      segments.forEach((segment) => {
+        if (!segment.text?.trim()) return;
+        const segText = segment.text.trim();
+        const isFinal = segment.final === true;
+
+        if (!isFinal) {
+          // ── Partial segment: update in-place or create a pending bubble ──
+          const existingPendingId = pendingIdRef.current.get(speakerKey);
+          if (existingPendingId) {
+            // Update the existing pending bubble text
+            setTranscript((prev) =>
+              prev.map((item) =>
+                item.id === existingPendingId ? { ...item, text: segText } : item
+              )
+            );
+          } else {
+            // First partial — create a new pending bubble
+            const newId = crypto.randomUUID();
+            pendingIdRef.current.set(speakerKey, newId);
+            pendingTranscriptRef.current.set(speakerKey, segText);
+            setTranscript((prev) => [
+              ...prev,
+              { id: newId, speaker: speakerRole, text: segText, timestamp },
+            ]);
+          }
+        } else {
+          // ── Final segment: finalize the pending bubble (or create if none) ──
+          const existingPendingId = pendingIdRef.current.get(speakerKey);
+          if (existingPendingId) {
+            // Commit final text into the existing bubble
+            setTranscript((prev) =>
+              prev.map((item) =>
+                item.id === existingPendingId ? { ...item, text: segText } : item
+              )
+            );
+            pendingIdRef.current.delete(speakerKey);
+            pendingTranscriptRef.current.delete(speakerKey);
+          } else {
+            // No pending bubble — create a completed one directly
+            setTranscript((prev) => [
+              ...prev,
+              { id: crypto.randomUUID(), speaker: speakerRole, text: segText, timestamp },
+            ]);
+          }
+        }
+      });
     }) as never);
     void (async () => {
       try {
