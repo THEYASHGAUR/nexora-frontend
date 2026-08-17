@@ -100,6 +100,24 @@ function LoginContent() {
     }
   };
 
+  const handleOAuthLogin = async (provider: "google") => {
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+      if (error) throw error;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "An unexpected error occurred.";
+      setErrorMsg(message);
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-background">
       {/* Background blobs */}
@@ -187,7 +205,7 @@ function LoginContent() {
             )}
 
             {/* OAuth buttons */}
-            {/* <div className="relative flex flex-col gap-3">
+            <div className="relative flex flex-col gap-3">
               <motion.button
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.99 }}
@@ -217,28 +235,16 @@ function LoginContent() {
                 </svg>
                 Continue with Google
               </motion.button>
-
-              <motion.button
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-                type="button"
-                disabled={loading}
-                onClick={() => handleOAuthLogin("github")}
-                className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary/70 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Github className="size-4 shrink-0" />
-                Continue with GitHub
-              </motion.button>
-            </div> */}
+            </div>
 
             {/* Divider */}
-            {/* <div className="relative my-6 flex items-center gap-4">
+            <div className="relative my-6 flex items-center gap-4">
               <div className="h-px flex-1 bg-border" />
               <span className="text-[11px] tracking-wider text-muted-foreground uppercase">
                 or
               </span>
               <div className="h-px flex-1 bg-border" />
-            </div> */}
+            </div>
 
             {/* Email form */}
             <form onSubmit={handleSubmit} className="relative flex flex-col gap-4">
