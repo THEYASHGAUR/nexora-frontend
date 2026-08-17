@@ -18,6 +18,7 @@ import {
   Brain,
   MessageSquare,
   Zap,
+  X,
 } from "lucide-react";
 import {
   Radar,
@@ -35,10 +36,13 @@ interface InterviewRecord {
   role: string;
   experience_level: string;
   interview_type: string;
+  difficulty?: "easy" | "medium" | "hard";
   actual_duration_seconds?: number;
   duration_minutes?: number;
   created_at?: string;
   status?: string;
+  raw_resume_text?: string;
+  raw_jd_text?: string;
 }
 
 export default function CandidateScoreReport({
@@ -55,6 +59,126 @@ export default function CandidateScoreReport({
   const [polling, setPolling] = useState(true);
   const [reportData, setReportData] = useState<Record<string, unknown> | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
+
+  const [retaking, setRetaking] = useState(false);
+  const [retakeStep, setRetakeStep] = useState("");
+  const [retakeError, setRetakeError] = useState<string | null>(null);
+
+  const handleRetakeInterview = async () => {
+    setRetaking(true);
+    setRetakeStep("Initialising retake session...");
+    setRetakeError(null);
+
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      router.push("/login?error=Please%20sign%20in%20to%20retake%20your%20interview");
+      return;
+    }
+
+    // Step 1: Microphone check
+    setRetakeStep("Checking microphone permissions...");
+    try {
+      if (typeof window !== "undefined" && navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+      } else {
+        throw new Error("Microphone API not supported");
+      }
+    } catch (micErr) {
+      console.error("Mic check failed:", micErr);
+      setRetakeError("Microphone access is required for the AI voice interview. Please grant permissions and try again.");
+      setRetaking(false);
+      return;
+    }
+
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8009";
+
+    // Step 2: Verify backend services
+    setRetakeStep("Verifying backend services...");
+    try {
+      const verifyRes = await fetch(`${backendUrl}/interview/verify-keys`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!verifyRes.ok) {
+        let errMsg = "Backend credential check failed.";
+        try {
+          const errData = await verifyRes.json();
+          errMsg = errData?.detail?.error || errData?.error || errData?.detail || errMsg;
+        } catch {}
+        setRetakeError(errMsg);
+        setRetaking(false);
+        return;
+      }
+    } catch (err) {
+      setRetakeError(`Cannot reach backend server at ${backendUrl}. Please ensure backend server is running.`);
+      setRetaking(false);
+      return;
+    }
+
+    // Step 3: Auth token
+    const { data: { session: authSession } } = await supabase.auth.getSession();
+    const authToken = authSession?.access_token;
+
+    // Step 4: Create new interview session reusing saved Resume & JD
+    setRetakeStep("Generating new question plan from saved Resume & JD...");
+    try {
+      const cleanResume = (interview?.raw_resume_text || "")
+        .replace(/\0/g, "")
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ");
+      const cleanJd = (interview?.raw_jd_text || "")
+        .replace(/\0/g, "")
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ");
+
+      const createRes = await fetch(`${backendUrl}/interviews`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({
+          role: interview?.role || "Fullstack Developer",
+          interview_type: interview?.interview_type || "Technical Round",
+          experience_level: interview?.experience_level || "Mid-Level (2-5 yrs)",
+          difficulty: interview?.difficulty || "medium",
+          duration_minutes: interview?.duration_minutes || 25,
+          resume_text: cleanResume,
+          jd_text: cleanJd,
+        }),
+      });
+
+      if (!createRes.ok) {
+        let errMsg = "Failed to prepare interview session.";
+        try {
+          const errData = await createRes.json();
+          errMsg = errData?.detail || errData?.error || errMsg;
+        } catch {}
+        setRetakeError(errMsg);
+        setRetaking(false);
+        return;
+      }
+
+      const createData = await createRes.json();
+      const sessionId = createData.session_id;
+
+      if (!sessionId) {
+        setRetakeError("Backend did not return a valid session ID.");
+        setRetaking(false);
+        return;
+      }
+
+      setRetakeStep("Interview ready! Entering room...");
+      router.push(`/ai-mock-interview/room/${sessionId}`);
+    } catch (err: unknown) {
+      console.error("Retake interview error:", err);
+      const msg = err instanceof Error ? err.message : "Failed to restart interview.";
+      setRetakeError(`Could not retake interview: ${msg}`);
+      setRetaking(false);
+    }
+  };
 
   useEffect(() => {
     async function loadReport() {
@@ -86,8 +210,11 @@ export default function CandidateScoreReport({
             role: sessionData.role || "Interview",
             experience_level: sessionData.experience_level || "",
             interview_type: sessionData.interview_type || "Technical Round",
+            difficulty: sessionData.difficulty || "medium",
             duration_minutes: sessionData.duration_minutes || 30,
             status: sessionData.status,
+            raw_resume_text: sessionData.raw_resume_text || "",
+            raw_jd_text: sessionData.raw_jd_text || "",
           });
         }
       } catch {}
@@ -242,7 +369,16 @@ export default function CandidateScoreReport({
             </p>
           </div>
 
-          <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="flex items-center gap-3 w-full md:w-auto flex-wrap sm:flex-nowrap">
+            <button
+              type="button"
+              onClick={handleRetakeInterview}
+              disabled={retaking}
+              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-xs font-semibold text-white shadow-lg transition-all disabled:opacity-50"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Retake Interview
+            </button>
             <button
               type="button"
               onClick={() => window.print()}
@@ -253,13 +389,25 @@ export default function CandidateScoreReport({
             </button>
             <Link
               href="/ai-mock-interview"
-              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-brand-gradient hover:opacity-95 text-xs font-semibold text-primary-foreground shadow-lg transition-all"
+              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-xs font-semibold text-zinc-300 transition-colors"
             >
-              <RotateCcw className="w-4 h-4" />
               New Interview
             </Link>
           </div>
         </div>
+
+        {retakeError && (
+          <div className="flex items-start gap-3 rounded-2xl border border-rose-500/40 bg-rose-500/10 p-4 text-xs md:text-sm text-rose-300 shadow-lg">
+            <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-rose-400" />
+            <div className="flex-1 leading-relaxed">{retakeError}</div>
+            <button
+              onClick={() => setRetakeError(null)}
+              className="text-rose-400 hover:text-rose-200"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Overview Row: Overall Score Ring & Metrics */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
@@ -525,7 +673,16 @@ export default function CandidateScoreReport({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap sm:flex-nowrap">
+            <button
+              type="button"
+              onClick={handleRetakeInterview}
+              disabled={retaking}
+              className="w-full sm:w-auto text-center px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-xs font-semibold text-white shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Retake Interview
+            </button>
             <Link
               href="/history"
               className="w-full sm:w-auto text-center px-5 py-2.5 rounded-xl border border-zinc-800 bg-zinc-950 hover:bg-zinc-800 text-xs font-semibold text-zinc-200 transition-colors"
@@ -536,11 +693,26 @@ export default function CandidateScoreReport({
               href="/ai-mock-interview"
               className="w-full sm:w-auto text-center px-5 py-2.5 rounded-xl bg-brand-gradient hover:opacity-95 text-xs font-semibold text-primary-foreground shadow-lg flex items-center justify-center gap-2"
             >
-              Practice Again
+              New Interview
               <ArrowRight className="w-4 h-4" />
             </Link>
           </div>
         </div>
+
+        {retaking && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-4">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 max-w-md w-full text-center shadow-2xl space-y-4 animate-in zoom-in-95 duration-200">
+              <div className="relative size-16 mx-auto flex items-center justify-center">
+                <div className="absolute inset-0 border-4 border-zinc-800 rounded-full" />
+                <div className="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin" />
+                <RotateCcw className="w-6 h-6 text-emerald-400" />
+              </div>
+              <h3 className="text-xl font-bold text-white">Retaking Interview</h3>
+              <p className="text-sm text-zinc-300 font-medium">{retakeStep}</p>
+              <p className="text-xs text-zinc-400">Reusing your uploaded Resume & Job Description without re-entering details.</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

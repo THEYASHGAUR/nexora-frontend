@@ -38,20 +38,27 @@ export async function updateSession(request: NextRequest) {
 
   const isProtectedPath =
     request.nextUrl.pathname.startsWith("/ai-mock-interview") ||
+    request.nextUrl.pathname.startsWith("/resume-analyzer") ||
+    request.nextUrl.pathname.startsWith("/landing") ||
     request.nextUrl.pathname.startsWith("/reports") ||
-    request.nextUrl.pathname.startsWith("/history");
+    request.nextUrl.pathname.startsWith("/history") ||
+    request.nextUrl.pathname.startsWith("/interview-questions") ||
+    request.nextUrl.pathname.startsWith("/hr-dashboard");
 
   const isAuthPath = request.nextUrl.pathname.startsWith("/login");
 
   if (!user && isProtectedPath) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
+    url.searchParams.set("redirectTo", request.nextUrl.pathname);
     return NextResponse.redirect(url);
   }
 
   if (user && isAuthPath) {
+    const redirectTo = request.nextUrl.searchParams.get("redirectTo") || "/ai-mock-interview";
     const url = request.nextUrl.clone();
-    url.pathname = "/ai-mock-interview";
+    url.pathname = redirectTo;
+    url.searchParams.delete("redirectTo");
     return NextResponse.redirect(url);
   }
 

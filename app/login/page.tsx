@@ -48,6 +48,8 @@ function LoginContent() {
     setErrorMsg(null);
     setSuccessMsg(null);
 
+    const targetPath = searchParams.get("redirectTo") || "/ai-mock-interview";
+
     try {
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({
@@ -61,7 +63,7 @@ function LoginContent() {
           return;
         }
 
-        router.push("/ai-mock-interview");
+        router.push(targetPath);
         router.refresh();
       } else {
         const { data, error } = await supabase.auth.signUp({
@@ -82,15 +84,33 @@ function LoginContent() {
         }
 
         if (data.session) {
-          router.push("/ai-mock-interview");
+          router.push(targetPath);
           router.refresh();
         } else {
           setSuccessMsg(
-            "Account created! Please check your email to confirm your account."
+            "Account created successfully! Please check your email to confirm, or sign in."
           );
           setLoading(false);
         }
       }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "An unexpected error occurred.";
+      setErrorMsg(message);
+      setLoading(false);
+    }
+  };
+
+  const handleOAuthLogin = async (provider: "google") => {
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+      if (error) throw error;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred.";
       setErrorMsg(message);
@@ -149,15 +169,15 @@ function LoginContent() {
             <div className="relative mb-8 text-center">
               <span className="inline-flex items-center gap-2 rounded-full border border-border bg-secondary/50 px-3 py-1 text-xs text-muted-foreground">
                 <Sparkles className="size-3 text-primary" />
-                {mode === "login" ? "Welcome back" : "Create your account"}
+                {mode === "login" ? "Welcome back" : "100% Free Account"}
               </span>
               <h1 className="mt-4 text-2xl font-bold tracking-tight md:text-3xl">
-                {mode === "login" ? "Sign in to Nexora" : "Start your journey"}
+                {mode === "login" ? "Sign in to Nexora" : "Start practicing for free"}
               </h1>
               <p className="mt-2 text-sm text-muted-foreground">
                 {mode === "login"
-                  ? "Continue your AI interview practice."
-                  : "Your first interview is free. No credit card required."}
+                  ? "Access your AI interviews, resume score & reports."
+                  : "All services are 100% free. No credit card required."}
               </p>
             </div>
 
@@ -185,7 +205,7 @@ function LoginContent() {
             )}
 
             {/* OAuth buttons */}
-            {/* <div className="relative flex flex-col gap-3">
+            <div className="relative flex flex-col gap-3">
               <motion.button
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.99 }}
@@ -215,28 +235,16 @@ function LoginContent() {
                 </svg>
                 Continue with Google
               </motion.button>
-
-              <motion.button
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-                type="button"
-                disabled={loading}
-                onClick={() => handleOAuthLogin("github")}
-                className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary/70 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Github className="size-4 shrink-0" />
-                Continue with GitHub
-              </motion.button>
-            </div> */}
+            </div>
 
             {/* Divider */}
-            {/* <div className="relative my-6 flex items-center gap-4">
+            <div className="relative my-6 flex items-center gap-4">
               <div className="h-px flex-1 bg-border" />
               <span className="text-[11px] tracking-wider text-muted-foreground uppercase">
                 or
               </span>
               <div className="h-px flex-1 bg-border" />
-            </div> */}
+            </div>
 
             {/* Email form */}
             <form onSubmit={handleSubmit} className="relative flex flex-col gap-4">

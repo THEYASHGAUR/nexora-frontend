@@ -33,7 +33,8 @@ export default function ResumeAnalyzer() {
   const resumeInputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
-  const ANALYZE_ENDPOINT = "https://ai-recruiterr.onrender.com/analyze";
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8009";
+  const ANALYZE_ENDPOINT = `${backendUrl}/analyze`;
   const DEFAULT_TOP_K = 5;
 
   const showToast = (message: string, type: "warn" | "success" = "warn") => {

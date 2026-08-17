@@ -37,7 +37,8 @@ export default function InterviewInsights() {
       const formData = new FormData();
       formData.append("jd_text", jdText);
 
-      const response = await fetch("http://127.0.0.1:8000/interview-questions", {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8009";
+      const response = await fetch(`${backendUrl}/interview-questions`, {
         method: "POST",
         body: formData,
       });

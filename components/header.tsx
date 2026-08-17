@@ -42,9 +42,11 @@ export default function Header() {
   };
 
   const navLinks = [
-    { name: "Resume Analyzer", href: "/landing" },
     { name: "AI Mock Interview", href: "/ai-mock-interview" },
+    { name: "Resume Analyzer", href: "/resume-analyzer" },
+    { name: "Question Insights", href: "/interview-questions" },
     { name: "History & Reports", href: "/history" },
+    // { name: "HR Dashboard", href: "/hr-dashboard" },
   ];
 
   const displayName =
